@@ -178,7 +178,7 @@ function createOverlayWindow() {
     skipTaskbar: true,
     hasShadow: false,
     show: false,
-    focusable: true,
+    focusable: false,
     webPreferences: {
       preload: path.join(ROOT, 'preload.cjs'),
       contextIsolation: true,
@@ -387,13 +387,11 @@ async function tick() {
         activeDisplayId: context.activeDisplayId,
         targetWindow: session.targetWindow,
         targetDisplayId: session.targetDisplayId,
-        windowLockEnabled: state.settings.windowLockEnabled && !isWayland,
         monitorLockEnabled: state.settings.monitorLockEnabled,
         tabLockEnabled: state.settings.tabLockEnabled && !isWayland,
         systemInactive: state.settings.pauseWhenScreenInactive && (
           systemPowerInactive || powerMonitor.getSystemIdleState(state.settings.idleThresholdSeconds) !== 'active'
-        ),
-        ownProcessId: process.pid
+        )
       });
       if (evaluation.focused) {
         closeCurrentEvent(context.capturedAt);

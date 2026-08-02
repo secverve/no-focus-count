@@ -25,7 +25,7 @@ final class ActivityMonitor {
     }
 
     func availableWindows() -> [TrackedWindow] {
-        windowRecords(onScreenOnly: false)
+        windowRecords(onScreenOnly: false, enrichTitles: true)
             .filter { $0.ownerPID != ProcessInfo.processInfo.processIdentifier }
             .filter {
                 NSRunningApplication(processIdentifier: $0.ownerPID)?.activationPolicy == .regular
@@ -48,8 +48,30 @@ final class ActivityMonitor {
             }
     }
 
+    func frontmostWindow() -> TrackedWindow? {
+        guard let application = NSWorkspace.shared.frontmostApplication,
+              application.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+              application.activationPolicy == .regular else { return nil }
+        let records = windowRecords(onScreenOnly: true, enrichTitles: true).filter {
+            $0.ownerPID == application.processIdentifier
+        }
+        let focusedTitle = focusedWindowTitle(pid: application.processIdentifier)
+        guard let record = records.first(where: {
+            !$0.title.isEmpty && $0.title == focusedTitle
+        }) ?? records.first else { return nil }
+        return TrackedWindow(
+            id: record.id,
+            ownerPID: record.ownerPID,
+            appName: record.appName,
+            bundleIdentifier: record.bundleIdentifier,
+            title: record.title,
+            monitorName: record.monitorName,
+            isOnScreen: record.isOnScreen
+        )
+    }
+
     func snapshot(for target: TrackedWindow) -> ActivitySnapshot {
-        let windows = windowRecords(onScreenOnly: true)
+        let windows = windowRecords(onScreenOnly: true, enrichTitles: false)
         let frontmostApplication = NSWorkspace.shared.frontmostApplication
         let frontmostPID = frontmostApplication?.processIdentifier
         let focusedTitle = focusedWindowTitle(pid: frontmostPID)
@@ -92,7 +114,7 @@ final class ActivityMonitor {
         return result?.stringValue
     }
 
-    private func windowRecords(onScreenOnly: Bool) -> [WindowRecord] {
+    private func windowRecords(onScreenOnly: Bool, enrichTitles: Bool) -> [WindowRecord] {
         let options: CGWindowListOption = onScreenOnly
             ? [.optionOnScreenOnly, .excludeDesktopElements]
             : [.optionAll, .excludeDesktopElements]
@@ -103,7 +125,7 @@ final class ActivityMonitor {
             return []
         }
 
-        return rawWindows.compactMap { info in
+        let records = rawWindows.compactMap { info -> WindowRecord? in
             guard
                 let layer = info[kCGWindowLayer as String] as? Int,
                 layer == 0,
@@ -131,6 +153,72 @@ final class ActivityMonitor {
                 monitorName: monitorName(for: bounds)
             )
         }
+        return enrichTitles ? enrichMissingTitles(in: records) : records
+    }
+
+    private func enrichMissingTitles(in records: [WindowRecord]) -> [WindowRecord] {
+        let missingPIDs = Set(records.filter { $0.title.isEmpty }.map(\.ownerPID))
+        let accessibleByPID = Dictionary(uniqueKeysWithValues: missingPIDs.map {
+            ($0, accessibilityWindows(pid: $0))
+        })
+        return records.map { record in
+            guard record.title.isEmpty,
+                  let candidates = accessibleByPID[record.ownerPID],
+                  let match = candidates.min(by: {
+                      boundsDistance($0.bounds, record.bounds) < boundsDistance($1.bounds, record.bounds)
+                  }),
+                  boundsDistance(match.bounds, record.bounds) < 28 else { return record }
+            return WindowRecord(
+                id: record.id,
+                ownerPID: record.ownerPID,
+                appName: record.appName,
+                bundleIdentifier: record.bundleIdentifier,
+                title: match.title,
+                bounds: record.bounds,
+                alpha: record.alpha,
+                isOnScreen: record.isOnScreen,
+                monitorName: record.monitorName
+            )
+        }
+    }
+
+    private func accessibilityWindows(pid: Int32) -> [(title: String, bounds: CGRect)] {
+        let application = AXUIElementCreateApplication(pid)
+        var rawWindows: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &rawWindows) == .success,
+              let windows = rawWindows as? [AXUIElement] else { return [] }
+        return windows.compactMap { window in
+            var rawTitle: CFTypeRef?
+            var rawPosition: CFTypeRef?
+            var rawSize: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &rawTitle) == .success,
+                  let title = rawTitle as? String,
+                  !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &rawPosition) == .success,
+                  AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &rawSize) == .success,
+                  let position = point(from: rawPosition),
+                  let size = size(from: rawSize) else { return nil }
+            return (title, CGRect(origin: position, size: size))
+        }
+    }
+
+    private func point(from value: CFTypeRef?) -> CGPoint? {
+        guard let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        var point = CGPoint.zero
+        guard AXValueGetValue(value as! AXValue, .cgPoint, &point) else { return nil }
+        return point
+    }
+
+    private func size(from value: CFTypeRef?) -> CGSize? {
+        guard let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        var size = CGSize.zero
+        guard AXValueGetValue(value as! AXValue, .cgSize, &size) else { return nil }
+        return size
+    }
+
+    private func boundsDistance(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
+        abs(lhs.minX - rhs.minX) + abs(lhs.minY - rhs.minY)
+            + abs(lhs.width - rhs.width) + abs(lhs.height - rhs.height)
     }
 
     private func monitorName(for bounds: CGRect) -> String? {

@@ -54,6 +54,10 @@ function renderOverlay() {
   $('#overlay-time').textContent = formatTime(state.runtime.remainingSeconds);
   $('#overlay-mode').textContent = state.runtime.mode === 'break' ? 'BREAK' : 'FOCUS';
   $('#overlay-status span').textContent = phaseLabel(state.runtime.phase);
+  const target = state.runtime.currentSession?.targetWindow;
+  const targetTitle = target?.title || (target ? `창 #${target.id}` : '집중 창 미선택');
+  $('#overlay-target').textContent = target ? `${target.owner?.name ?? '앱'} · ${targetTitle}` : targetTitle;
+  $('#overlay-target').title = $('#overlay-target').textContent;
   $('#overlay-pause').textContent = state.runtime.phase === 'paused-user' ? '▶' : 'Ⅱ';
   $('#overlay-stop').style.display = state.runtime.currentSession ? '' : 'none';
 }
@@ -98,7 +102,7 @@ function renderDashboard() {
   setValue('#long-break-cycle', settings.cyclesBeforeLongBreak);
   setValue('#daily-goal-minutes', settings.dailyGoalMinutes);
   setValue('#idle-threshold', settings.idleThresholdSeconds);
-  $('#window-lock').checked = settings.windowLockEnabled;
+  $('#window-lock').checked = true;
   $('#monitor-lock').checked = settings.monitorLockEnabled;
   $('#tab-lock').checked = settings.tabLockEnabled;
   $('#screen-inactive').checked = settings.pauseWhenScreenInactive;
@@ -238,7 +242,7 @@ function renderFocusInspector() {
   $('#inspector-active-detail').textContent = active ? windowDetail(active, activeDisplayId) : '세션 중 1초마다 갱신됩니다';
   $('#inspector-verdict').textContent = reasonLabels[reason] ?? reason;
   $('#inspector-verdict-detail').textContent = `창 #${target?.id ?? '?'} · 모니터 ${targetDisplayId || '?'} 기준`;
-  $('.focus-inspector article:last-child').classList.toggle('warn', !['ready', 'checking', 'focused', 'app-control', 'break', 'completed'].includes(reason));
+  $('.focus-inspector article:last-child').classList.toggle('warn', !['ready', 'checking', 'focused', 'break', 'completed'].includes(reason));
 }
 
 function dateKey(date) {
@@ -313,7 +317,7 @@ async function refreshContext() {
   }));
   displaySelect.replaceChildren(new Option('모니터를 선택하세요', ''), ...context.displays.map(item => new Option(`${item.label}${item.primary ? ' · 주 모니터' : ''} · ${item.bounds.width}×${item.bounds.height}`, item.id)));
   if (context.windows.some(item => item.id === oldWindow)) windowSelect.value = oldWindow;
-  else if (context.windows[0]) windowSelect.value = context.windows[0].id;
+  else windowSelect.value = '';
   if (context.displays.some(item => item.id === oldDisplay)) displaySelect.value = oldDisplay;
   else if (context.displays[0]) displaySelect.value = context.displays.find(item => item.primary)?.id ?? context.displays[0].id;
   renderFocusInspector();
@@ -326,7 +330,7 @@ async function startOrToggle() {
   }
   const targetWindow = context.windows.find(item => item.id === $('#target-window').value);
   const targetDisplayId = $('#target-display').value || null;
-  if (selectedMode === 'focus' && state.settings.windowLockEnabled && !targetWindow && !state.capabilities.waylandLimited) {
+  if (selectedMode === 'focus' && !targetWindow && !state.capabilities.waylandLimited) {
     await refreshContext();
     return;
   }

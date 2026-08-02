@@ -14,6 +14,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var screenCaptureTrusted = false
     @Published private(set) var latestSnapshot: ActivitySnapshot?
     @Published private(set) var latestFocusStatus: FocusStatus?
+    @Published private(set) var windowPickCountdown: Int?
+    @Published private(set) var windowPickMessage: String?
+    @Published private(set) var windowPickError = false
 
     @Published var participantName: String {
         didSet { UserDefaults.standard.set(participantName, forKey: Keys.participantName) }
@@ -60,6 +63,7 @@ final class AppModel: ObservableObject {
     private var graceUntil: Date?
     private var currentDistractionIndex: Int?
     private var miniTimerPanel: MiniTimerPanelController?
+    private var windowPickTask: Task<Void, Never>?
 
     init(
         monitor: ActivityMonitor = ActivityMonitor(),
@@ -93,6 +97,7 @@ final class AppModel: ObservableObject {
 
     deinit {
         timer?.invalidate()
+        windowPickTask?.cancel()
     }
 
     var selectedWindow: TrackedWindow? {
@@ -129,11 +134,56 @@ final class AppModel: ObservableObject {
         windows = monitor.availableWindows()
         if let previousSelection, windows.contains(where: { $0.id == previousSelection }) {
             selectedWindowID = previousSelection
-        } else if selectedWindow == nil {
-            selectedWindowID = windows.first?.id
+        } else {
+            selectedWindowID = nil
         }
         accessibilityTrusted = monitor.isAccessibilityTrusted
         refreshFocusDiagnostic()
+    }
+
+    func selectWindow(_ window: TrackedWindow) {
+        selectedWindowID = window.id
+        let title = window.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        windowPickMessage = "\(window.appName) · \(title.isEmpty ? "창 #\(window.id)" : title) 선택 완료"
+        windowPickError = false
+        refreshFocusDiagnostic()
+    }
+
+    func beginQuickWindowPick() {
+        guard currentSession == nil else {
+            windowPickMessage = "진행 중인 세션을 끝낸 뒤 창을 바꿀 수 있어요."
+            windowPickError = true
+            return
+        }
+        windowPickTask?.cancel()
+        windowPickMessage = "앱을 숨겼습니다. 3초 안에 집중할 창을 앞으로 가져오세요."
+        windowPickError = false
+        windowPickCountdown = 3
+        NSApp.hide(nil)
+        windowPickTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            for second in stride(from: 3, through: 1, by: -1) {
+                windowPickCountdown = second
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+            }
+            let pickedWindow = monitor.frontmostWindow()
+            windows = monitor.availableWindows()
+            if let pickedWindow,
+               windows.contains(where: { $0.id == pickedWindow.id }) {
+                selectedWindowID = pickedWindow.id
+                windowPickMessage = "\(pickedWindow.appName) · \(pickedWindow.title.isEmpty ? "제목 없는 창" : pickedWindow.title) 선택 완료"
+                windowPickError = false
+            } else {
+                windowPickMessage = "창을 찾지 못했습니다. 원하는 창을 화면 앞으로 띄운 뒤 다시 시도해 주세요."
+                windowPickError = true
+            }
+            windowPickCountdown = nil
+            refreshFocusDiagnostic()
+            NSApp.unhide(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.windows.first(where: { !($0 is NSPanel) })?.makeKeyAndOrderFront(nil)
+        }
     }
 
     func requestAccessibilityPermission() {

@@ -175,6 +175,7 @@ button { cursor: pointer; }
 .overlay-surface:hover::after, body.overlay-unlocked .overlay-surface::after { opacity: 1; }
 .overlay-mode { position: absolute; top: 17px; left: 19px; z-index: 1; color: rgba(255,255,255,.58); font: 760 8px/1 ui-monospace, monospace; letter-spacing: 1.7px; opacity: 0; transform: translateY(3px); transition: .2s ease; }
 .overlay-time { position: absolute; left: 50%; top: 50%; z-index: 1; color: var(--timer); font: 620 var(--overlay-timer-size)/1 ui-rounded, "SF Pro Rounded", "Segoe UI", sans-serif; letter-spacing: -4px; white-space: nowrap; font-variant-numeric: tabular-nums; text-shadow: 0 2px 5px rgba(0,0,0,.82), 0 0 1px rgba(0,0,0,.95); transform: translate(-50%, -50%); transition: transform .2s ease; }
+.overlay-target { position: absolute; z-index: 1; left: 50%; top: calc(50% + 44px); width: calc(100% - 42px); overflow: hidden; color: rgba(255,255,255,.68); font: 650 9px/1.2 ui-rounded, "SF Pro Rounded", "Segoe UI", sans-serif; text-align: center; text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 1px 3px rgba(0,0,0,.9); transform: translateX(-50%); transition: .2s ease; }
 .overlay-status { position: absolute; left: 19px; bottom: 18px; z-index: 1; opacity: 0; transform: translateY(3px); transition: .2s ease; }
 .overlay-controls { position: absolute; right: 13px; bottom: 10px; z-index: 2; display: flex; gap: 2px; opacity: 0; transform: translateY(4px); transition: .2s ease; }
 .overlay-controls button { width: 29px; height: 29px; color: rgba(255,255,255,.78); background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.10); font-size: 11px; }
@@ -182,6 +183,7 @@ button { cursor: pointer; }
 .overlay-surface:hover .overlay-mode, .overlay-surface:hover .overlay-status, .overlay-surface:hover .overlay-controls,
 body.overlay-unlocked .overlay-mode, body.overlay-unlocked .overlay-status, body.overlay-unlocked .overlay-controls { opacity: 1; transform: none; }
 .overlay-surface:hover .overlay-time, body.overlay-unlocked .overlay-time { transform: translate(-50%, -61%); }
+.overlay-surface:hover .overlay-target, body.overlay-unlocked .overlay-target { top: 17px; left: auto; right: 17px; width: 205px; text-align: right; transform: none; }
 
 @media (max-width: 780px) {
   .settings-grid, .theme-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -16,65 +16,75 @@ struct MiniTimerView: View {
                 .padding(.top, 9)
                 .opacity(hovered ? 1 : 0)
 
-            VStack(spacing: 9) {
+            VStack(spacing: 3) {
                 Text(model.remainingFocusSeconds.clockText)
-                    .font(.system(size: 46, weight: .semibold, design: .rounded).monospacedDigit())
+                    .font(.system(size: 43, weight: .semibold, design: .rounded).monospacedDigit())
                     .tracking(-2.5)
                     .foregroundStyle(Color.white.opacity(0.96))
                     .shadow(color: .black.opacity(0.72), radius: 3, y: 1)
                     .contentTransition(.numericText())
-                    .offset(y: hovered ? -5 : 0)
-
-                HStack(spacing: 8) {
-                    HStack(spacing: 5) {
-                        Circle()
-                            .fill(statusColor)
-                            .frame(width: 6, height: 6)
-                            .shadow(color: statusColor.opacity(0.8), radius: 4)
-                        Text(model.phase.label.uppercased())
-                            .font(.system(size: 8, weight: .bold, design: .rounded))
-                    }
-                    .padding(.horizontal, 9)
-                    .frame(height: 28)
-                    .background(Color.white.opacity(0.08), in: Capsule())
-
-                    if model.currentSession != nil {
-                        Button {
-                            model.toggleManualPause()
-                        } label: {
-                            Image(systemName: model.phase == .pausedByUser ? "play.fill" : "pause.fill")
-                        }
-                        .buttonStyle(MiniGlassButtonStyle())
-
-                        Button {
-                            model.stopSession()
-                        } label: {
-                            Image(systemName: "stop.fill")
-                        }
-                        .buttonStyle(MiniGlassButtonStyle())
-                    }
-
-                    Button {
-                        openMainWindow()
-                    } label: {
-                        Image(systemName: "slider.horizontal.3")
-                    }
-                    .buttonStyle(MiniGlassButtonStyle())
-                    .help("설정 열기")
-
-                    Button {
-                        closeMiniTimer()
-                    } label: {
-                        Image(systemName: "xmark")
-                    }
-                    .buttonStyle(MiniGlassButtonStyle())
-                    .help("타이머 숨기기")
-                }
-                .opacity(hovered ? 1 : 0)
-                .offset(y: hovered ? -5 : 4)
-                .allowsHitTesting(hovered)
+                Text(selectedWindowLabel)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.white.opacity(0.72))
+                    .shadow(color: .black.opacity(0.85), radius: 2, y: 1)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 250)
+                    .help(selectedWindowLabel)
             }
             .padding(.horizontal, 14)
+            .offset(y: hovered ? -13 : 0)
+
+            HStack(spacing: 8) {
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 6, height: 6)
+                        .shadow(color: statusColor.opacity(0.8), radius: 4)
+                    Text(model.phase.label.uppercased())
+                        .font(.system(size: 8, weight: .bold, design: .rounded))
+                }
+                .padding(.horizontal, 9)
+                .frame(height: 28)
+                .background(Color.white.opacity(0.08), in: Capsule())
+
+                if model.currentSession != nil {
+                    Button {
+                        model.toggleManualPause()
+                    } label: {
+                        Image(systemName: model.phase == .pausedByUser ? "play.fill" : "pause.fill")
+                    }
+                    .buttonStyle(MiniGlassButtonStyle())
+
+                    Button {
+                        model.stopSession()
+                    } label: {
+                        Image(systemName: "stop.fill")
+                    }
+                    .buttonStyle(MiniGlassButtonStyle())
+                }
+
+                Button {
+                    openMainWindow()
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                }
+                .buttonStyle(MiniGlassButtonStyle())
+                .help("설정 열기")
+
+                Button {
+                    closeMiniTimer()
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(MiniGlassButtonStyle())
+                .help("타이머 숨기기")
+            }
+            .frame(maxHeight: .infinity, alignment: .bottom)
+            .padding(.bottom, 11)
+            .opacity(hovered ? 1 : 0)
+            .offset(y: hovered ? 0 : 4)
+            .allowsHitTesting(hovered)
         }
         .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .frame(width: 292, height: 126)
@@ -127,6 +137,14 @@ struct MiniTimerView: View {
 
     private func closeMiniTimer() {
         NSApp.windows.first { $0.identifier?.rawValue == MiniTimerPanelController.identifier }?.orderOut(nil)
+    }
+
+    private var selectedWindowLabel: String {
+        guard let target = model.currentSession?.target ?? model.selectedWindow else {
+            return "집중 창 미선택"
+        }
+        let title = target.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? "\(target.appName) · 창 #\(target.id)" : "\(target.appName) · \(title)"
     }
 
     private var statusColor: Color {

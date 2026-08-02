@@ -12,6 +12,7 @@
       <div class="overlay-surface">
         <div class="overlay-mode" id="overlay-mode">FOCUS</div>
         <div class="overlay-time" id="overlay-time">25:00</div>
+        <div class="overlay-target" id="overlay-target">집중 창 미선택</div>
         <div class="overlay-status" id="overlay-status"><i></i><span>READY</span></div>
         <div class="overlay-controls no-drag">
           <button id="overlay-pause" aria-label="일시정지">Ⅱ</button>
@@ -102,7 +103,7 @@
             <label class="field"><span>유휴 정지 기준</span><input id="idle-threshold" type="number" min="30" max="3600"><em>초</em></label>
           </div>
           <div class="toggle-grid">
-            <label><input id="window-lock" type="checkbox"><span>선택 창을 벗어나면 정지</span></label>
+            <label><input id="window-lock" type="checkbox" disabled><span>선택 창 이탈 시 정지 · 항상 적용</span></label>
             <label><input id="monitor-lock" type="checkbox"><span>선택 모니터를 벗어나면 정지</span></label>
             <label><input id="tab-lock" type="checkbox"><span>브라우저 탭이 바뀌면 정지</span></label>
             <label><input id="screen-inactive" type="checkbox"><span>화면 잠금·절전·유휴 시 정지</span></label>

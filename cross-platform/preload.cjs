@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('nfc', {
   showOverlay: () => ipcRenderer.invoke('overlay:show'),
   hideOverlay: () => ipcRenderer.invoke('overlay:hide'),
   setOverlayInteractive: interactive => ipcRenderer.invoke('overlay:set-interactive', interactive),
+  showDashboard: () => ipcRenderer.invoke('window:show'),
   minimize: () => ipcRenderer.invoke('window:minimize'),
   close: () => ipcRenderer.invoke('window:close'),
   clearHistory: () => ipcRenderer.invoke('history:clear'),

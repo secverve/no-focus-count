@@ -4,68 +4,125 @@ import SwiftUI
 struct MiniTimerView: View {
     @ObservedObject var model: AppModel
     @State private var hovered = false
+    @State private var dragOffset: NSPoint?
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(red: 0.025, green: 0.028, blue: 0.032).opacity(0.96))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(statusColor.opacity(hovered ? 0.45 : 0.18))
-                }
-                .shadow(color: .black.opacity(0.45), radius: 18, y: 8)
+        ZStack(alignment: .top) {
+            glassSurface
 
-            VStack(spacing: 4) {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(statusColor)
-                        .frame(width: 7, height: 7)
-                        .shadow(color: statusColor, radius: 4)
-                    Text(model.remainingFocusSeconds.clockText)
-                        .font(.system(size: 37, weight: .medium, design: .monospaced).monospacedDigit())
-                        .tracking(-2)
-                        .contentTransition(.numericText())
-                }
-                .offset(y: hovered ? -8 : 0)
+            Capsule()
+                .fill(Color.white.opacity(0.36))
+                .frame(width: 34, height: 4)
+                .padding(.top, 9)
+                .opacity(hovered ? 1 : 0)
+
+            VStack(spacing: 9) {
+                Text(model.remainingFocusSeconds.clockText)
+                    .font(.system(size: 46, weight: .semibold, design: .rounded).monospacedDigit())
+                    .tracking(-2.5)
+                    .foregroundStyle(Color.white.opacity(0.96))
+                    .shadow(color: .black.opacity(0.72), radius: 3, y: 1)
+                    .contentTransition(.numericText())
+                    .offset(y: hovered ? -5 : 0)
 
                 HStack(spacing: 8) {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(statusColor)
+                            .frame(width: 6, height: 6)
+                            .shadow(color: statusColor.opacity(0.8), radius: 4)
+                        Text(model.phase.label.uppercased())
+                            .font(.system(size: 8, weight: .bold, design: .rounded))
+                    }
+                    .padding(.horizontal, 9)
+                    .frame(height: 28)
+                    .background(Color.white.opacity(0.08), in: Capsule())
+
                     if model.currentSession != nil {
                         Button {
                             model.toggleManualPause()
                         } label: {
                             Image(systemName: model.phase == .pausedByUser ? "play.fill" : "pause.fill")
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(MiniGlassButtonStyle())
 
                         Button {
                             model.stopSession()
                         } label: {
                             Image(systemName: "stop.fill")
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(MiniGlassButtonStyle())
                     }
 
-                    Text(model.phase.label)
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .lineLimit(1)
+                    Button {
+                        openMainWindow()
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                    }
+                    .buttonStyle(MiniGlassButtonStyle())
+                    .help("설정 열기")
 
                     Button {
                         closeMiniTimer()
                     } label: {
                         Image(systemName: "xmark")
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(MiniGlassButtonStyle())
+                    .help("타이머 숨기기")
                 }
-                .foregroundStyle(.secondary)
                 .opacity(hovered ? 1 : 0)
-                .offset(y: hovered ? -3 : 3)
+                .offset(y: hovered ? -5 : 4)
                 .allowsHitTesting(hovered)
             }
+            .padding(.horizontal, 14)
         }
-        .frame(width: 236, height: 104)
+        .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .frame(width: 292, height: 126)
         .preferredColorScheme(.dark)
-        .animation(.easeOut(duration: 0.16), value: hovered)
+        .animation(.snappy(duration: 0.22), value: hovered)
         .onHover { hovered = $0 }
+        .simultaneousGesture(windowDragGesture)
+    }
+
+    private var windowDragGesture: some Gesture {
+        DragGesture(minimumDistance: 3, coordinateSpace: .global)
+            .onChanged { _ in
+                guard let panel = NSApp.windows.first(where: {
+                    $0.identifier?.rawValue == MiniTimerPanelController.identifier
+                }) else { return }
+                let mouse = NSEvent.mouseLocation
+                if dragOffset == nil {
+                    dragOffset = NSPoint(x: mouse.x - panel.frame.minX, y: mouse.y - panel.frame.minY)
+                }
+                guard let dragOffset else { return }
+                panel.setFrameOrigin(NSPoint(x: mouse.x - dragOffset.x, y: mouse.y - dragOffset.y))
+            }
+            .onEnded { _ in dragOffset = nil }
+    }
+
+    private var glassSurface: some View {
+        RoundedRectangle(cornerRadius: 28, style: .continuous)
+            .fill(.ultraThinMaterial)
+            .overlay {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .stroke(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.42), Color.white.opacity(0.08), statusColor.opacity(0.24)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.8
+                    )
+            }
+            .shadow(color: .black.opacity(0.18), radius: 24, y: 10)
+            .opacity(hovered ? 1 : 0)
+    }
+
+    private func openMainWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.windows.first {
+            $0.identifier?.rawValue != MiniTimerPanelController.identifier && !($0 is NSPanel)
+        }?.makeKeyAndOrderFront(nil)
     }
 
     private func closeMiniTimer() {
@@ -83,12 +140,25 @@ struct MiniTimerView: View {
     }
 }
 
+private struct MiniGlassButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(Color.white.opacity(configuration.isPressed ? 0.62 : 0.9))
+            .frame(width: 28, height: 28)
+            .background(Color.white.opacity(configuration.isPressed ? 0.16 : 0.08), in: Circle())
+            .overlay { Circle().stroke(Color.white.opacity(0.12), lineWidth: 0.7) }
+    }
+}
+
 @MainActor
 final class MiniTimerPanelController: NSWindowController {
     static let identifier = "NoFocusCountMiniTimer"
+    private static let frameAutosaveName = "NoFocusCountMiniTimerFrame"
+    private var hoverTrackingTimer: Timer?
 
     init(model: AppModel) {
-        let size = NSSize(width: 236, height: 104)
+        let size = NSSize(width: 292, height: 126)
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -100,11 +170,19 @@ final class MiniTimerPanelController: NSWindowController {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
-        panel.isMovableByWindowBackground = true
+        panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         panel.contentView = NSHostingView(rootView: MiniTimerView(model: model))
+        if !panel.setFrameUsingName(Self.frameAutosaveName) {
+            let visibleFrame = NSScreen.main?.visibleFrame ?? .zero
+            panel.setFrameOrigin(NSPoint(
+                x: visibleFrame.maxX - panel.frame.width - 24,
+                y: visibleFrame.maxY - panel.frame.height - 24
+            ))
+        }
+        panel.setFrameAutosaveName(Self.frameAutosaveName)
         super.init(window: panel)
     }
 
@@ -115,14 +193,19 @@ final class MiniTimerPanelController: NSWindowController {
 
     func show() {
         guard let panel = window else { return }
-        if !panel.isVisible {
-            let visibleFrame = NSScreen.main?.visibleFrame ?? .zero
-            let origin = NSPoint(
-                x: visibleFrame.maxX - panel.frame.width - 24,
-                y: visibleFrame.maxY - panel.frame.height - 24
-            )
-            panel.setFrameOrigin(origin)
-        }
         panel.orderFrontRegardless()
+        startHoverTracking()
+    }
+
+    private func startHoverTracking() {
+        guard hoverTrackingTimer == nil else { return }
+        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let panel = self?.window, panel.isVisible else { return }
+                panel.ignoresMouseEvents = !panel.frame.contains(NSEvent.mouseLocation)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        hoverTrackingTimer = timer
     }
 }

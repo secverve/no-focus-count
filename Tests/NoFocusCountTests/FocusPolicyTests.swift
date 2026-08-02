@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 @testable import NoFocusCount
 
 final class FocusPolicyTests: XCTestCase {
@@ -20,6 +21,11 @@ final class FocusPolicyTests: XCTestCase {
         XCTAssertEqual(FocusPolicy.evaluate(snapshot: snapshot, target: target, minimumVisibleFraction: 0.65), .differentApplication)
     }
 
+    func testDifferentWindowInSameApplicationPausesFocus() {
+        let snapshot = makeSnapshot(pid: 100, windowID: 77, isOnScreen: true, visible: 1)
+        XCTAssertEqual(FocusPolicy.evaluate(snapshot: snapshot, target: target, minimumVisibleFraction: 0.65), .differentWindow)
+    }
+
     func testCoveredTargetPausesFocus() {
         let snapshot = makeSnapshot(pid: 100, windowID: 42, isOnScreen: true, visible: 0.3)
         XCTAssertEqual(FocusPolicy.evaluate(snapshot: snapshot, target: target, minimumVisibleFraction: 0.65), .targetCovered)
@@ -28,6 +34,19 @@ final class FocusPolicyTests: XCTestCase {
     func testMissingTargetPausesFocus() {
         let snapshot = makeSnapshot(pid: 100, windowID: 42, isOnScreen: false, visible: 0)
         XCTAssertEqual(FocusPolicy.evaluate(snapshot: snapshot, target: target, minimumVisibleFraction: 0.65), .targetUnavailable)
+    }
+
+    func testRunningChromeWindowsRemainSelectable() throws {
+        let chromeIsRunning = NSWorkspace.shared.runningApplications.contains {
+            $0.bundleIdentifier == "com.google.Chrome"
+        }
+        guard chromeIsRunning else { throw XCTSkip("Chrome is not running on this machine") }
+
+        let chromeWindows = ActivityMonitor().availableWindows().filter {
+            $0.bundleIdentifier == "com.google.Chrome"
+        }
+        XCTAssertFalse(chromeWindows.isEmpty, "Chrome is running but no Chrome windows were exposed")
+        XCTAssertTrue(chromeWindows.allSatisfy { $0.identityLabel.contains("창 #") })
     }
 
     func testLeaderboardOrdersHigherFocusRatioFirst() {

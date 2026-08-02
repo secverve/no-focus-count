@@ -75,24 +75,22 @@ export function evaluateFocus({
   activeDisplayId,
   targetWindow,
   targetDisplayId,
-  windowLockEnabled,
   monitorLockEnabled,
   tabLockEnabled,
-  systemInactive,
-  ownProcessId
+  systemInactive
 }) {
   if (systemInactive) {
     return { focused: false, reason: 'screen-inactive' };
   }
-  if (activeWindow?.owner?.processId === ownProcessId) {
-    return { focused: true, reason: 'app-control' };
-  }
   if (monitorLockEnabled && targetDisplayId != null && String(activeDisplayId) !== String(targetDisplayId)) {
     return { focused: false, reason: 'left-monitor' };
   }
-  if (windowLockEnabled && targetWindow) {
+  if (targetWindow) {
     if (!activeWindow) return { focused: false, reason: 'window-unavailable' };
-    if (String(activeWindow.id) !== String(targetWindow.id)) {
+    const activeOwner = activeWindow.owner?.processId;
+    const targetOwner = targetWindow.owner?.processId;
+    if ((activeOwner != null && targetOwner != null && String(activeOwner) !== String(targetOwner))
+      || String(activeWindow.id) !== String(targetWindow.id)) {
       return { focused: false, reason: 'different-window' };
     }
   }

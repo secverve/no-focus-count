@@ -62,6 +62,36 @@ test('same browser window with another tab pauses focus', () => {
   assert.deepEqual(result, { focused: false, reason: 'different-tab' });
 });
 
+test('a selected window stays locked even if the legacy toggle is off', () => {
+  const result = evaluateFocus({
+    activeWindow: { id: 88, title: 'Codex', owner: { processId: 20 } },
+    activeDisplayId: 1,
+    targetWindow: { id: 10, title: 'Chrome study', owner: { processId: 8 } },
+    targetDisplayId: 1,
+    windowLockEnabled: false,
+    monitorLockEnabled: false,
+    tabLockEnabled: false,
+    systemInactive: false,
+    ownProcessId: 999
+  });
+  assert.deepEqual(result, { focused: false, reason: 'different-window' });
+});
+
+test('opening No Focus Count does not count as Chrome focus', () => {
+  const result = evaluateFocus({
+    activeWindow: { id: 77, title: 'No Focus Count', owner: { processId: 999 } },
+    activeDisplayId: 1,
+    targetWindow: { id: 10, title: 'Chrome study', owner: { processId: 8 } },
+    targetDisplayId: 1,
+    windowLockEnabled: true,
+    monitorLockEnabled: false,
+    tabLockEnabled: false,
+    systemInactive: false,
+    ownProcessId: 999
+  });
+  assert.deepEqual(result, { focused: false, reason: 'different-window' });
+});
+
 test('locked or sleeping screen pauses regardless of window', () => {
   const result = evaluateFocus({
     activeWindow: { id: 10, owner: { processId: 8 } },

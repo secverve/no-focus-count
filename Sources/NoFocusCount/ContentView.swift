@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct ContentView: View {
@@ -421,25 +422,7 @@ private struct SessionSettingsView: View {
                                 .frame(maxWidth: 240)
                         }
 
-                        NFCSettingRow(title: "집중할 창", subtitle: "제목이 숨겨진 창도 번호로 표시합니다") {
-                            HStack {
-                                Picker("", selection: $model.selectedWindowID) {
-                                    Text("창 선택").tag(Optional<UInt32>.none)
-                                    ForEach(model.windows) { window in
-                                        Text(window.identityLabel).tag(Optional(window.id))
-                                    }
-                                }
-                                .labelsHidden()
-                                .frame(maxWidth: 300)
-
-                                Button {
-                                    model.refreshWindows()
-                                } label: {
-                                    Image(systemName: "arrow.clockwise")
-                                }
-                                .buttonStyle(.borderless)
-                            }
-                        }
+                        WindowPickerView(model: model)
 
                         NFCSettingRow(title: "집중 시간", subtitle: "5분부터 120분까지") {
                             Stepper("\(model.focusMinutes)분", value: $model.focusMinutes, in: 5...120, step: 5)
@@ -532,9 +515,233 @@ private struct SessionSettingsView: View {
             .padding(14)
             .zIndex(10)
         }
-        .frame(minWidth: 420, idealWidth: 620, maxWidth: 720, minHeight: 360, idealHeight: 570, maxHeight: 680)
+        .frame(minWidth: 420, idealWidth: 680, maxWidth: 780, minHeight: 360, idealHeight: 680, maxHeight: 780)
         .preferredColorScheme(.dark)
         .onAppear { model.refreshWindows() }
+    }
+}
+
+private struct WindowPickerView: View {
+    @ObservedObject var model: AppModel
+    @State private var searchText = ""
+
+    private let columns = [GridItem(.adaptive(minimum: 230), spacing: 9)]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("집중할 창")
+                        .font(.callout.weight(.semibold))
+                    Text(selectedSummary)
+                        .font(.caption)
+                        .foregroundStyle(model.selectedWindow == nil ? Color.orange : Color.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                Button {
+                    model.beginQuickWindowPick()
+                } label: {
+                    Label(
+                        model.windowPickCountdown.map { "\($0)초 뒤 선택" } ?? "3초 자동 선택",
+                        systemImage: "scope"
+                    )
+                }
+                .buttonStyle(NFCPillButtonStyle(primary: true))
+                .disabled(model.windowPickCountdown != nil || model.currentSession != nil)
+
+                Button {
+                    model.refreshWindows()
+                } label: {
+                    Label("새로고침", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(NFCPillButtonStyle())
+            }
+
+            if let message = model.windowPickMessage {
+                Label(message, systemImage: model.windowPickError ? "exclamationmark.circle" : "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(model.windowPickError ? Color.orange : Color.nfcLime)
+                    .lineLimit(2)
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.tertiary)
+                TextField("앱 이름이나 창 제목 검색", text: $searchText)
+                    .textFieldStyle(.plain)
+                Text("\(filteredWindows.count)개")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 36)
+            .background(Color.black.opacity(0.18), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 0.7)
+            }
+
+            if filteredWindows.isEmpty {
+                emptyState
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        if !visibleWindows.isEmpty {
+                            windowSection(title: "지금 화면에 보이는 창", windows: visibleWindows, tint: .nfcLime)
+                        }
+                        if !otherWindows.isEmpty {
+                            windowSection(title: "다른 Space · 최소화된 창", windows: otherWindows, tint: .orange)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .frame(minHeight: 120, maxHeight: 310)
+            }
+        }
+        .padding(16)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.white.opacity(0.10), lineWidth: 0.8)
+        }
+    }
+
+    private var filteredWindows: [TrackedWindow] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return model.windows }
+        return model.windows.filter { window in
+            [window.appName, window.title, window.monitorName ?? "", String(window.id)]
+                .contains { $0.localizedCaseInsensitiveContains(query) }
+        }
+    }
+
+    private var visibleWindows: [TrackedWindow] {
+        filteredWindows.filter { $0.isOnScreen != false }
+    }
+
+    private var otherWindows: [TrackedWindow] {
+        filteredWindows.filter { $0.isOnScreen == false }
+    }
+
+    private var selectedSummary: String {
+        guard let selected = model.selectedWindow else {
+            return "아래 카드에서 고르거나 자동 선택을 사용하세요"
+        }
+        return "선택됨 · \(selected.appName) · \(pickerTitle(selected))"
+    }
+
+    @ViewBuilder
+    private func windowSection(title: String, windows: [TrackedWindow], tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 7) {
+                Circle().fill(tint).frame(width: 6, height: 6)
+                Text(title.uppercased())
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .tracking(0.7)
+                    .foregroundStyle(.secondary)
+                Text("\(windows.count)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 9) {
+                ForEach(windows) { window in
+                    windowCard(window)
+                }
+            }
+        }
+    }
+
+    private func windowCard(_ window: TrackedWindow) -> some View {
+        let selected = model.selectedWindowID == window.id
+        return Button {
+            model.selectWindow(window)
+        } label: {
+            HStack(alignment: .top, spacing: 11) {
+                appIcon(for: window)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 5) {
+                        Text(window.appName)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 2)
+                        if selected {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(Color.nfcLime)
+                        }
+                    }
+                    Text(pickerTitle(window))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: 5) {
+                        Image(systemName: "display")
+                        Text(window.monitorName ?? "모니터 미확인")
+                        Text("· #\(window.id)")
+                    }
+                    .font(.system(size: 9, design: .rounded))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                }
+            }
+            .padding(11)
+            .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
+            .background(
+                selected ? Color.nfcLime.opacity(0.10) : Color.white.opacity(0.035),
+                in: RoundedRectangle(cornerRadius: 13, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .stroke(selected ? Color.nfcLime.opacity(0.65) : Color.white.opacity(0.07), lineWidth: selected ? 1.2 : 0.7)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(model.currentSession != nil)
+    }
+
+    @ViewBuilder
+    private func appIcon(for window: TrackedWindow) -> some View {
+        if let icon = NSRunningApplication(processIdentifier: window.ownerPID)?.icon {
+            Image(nsImage: icon)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 34, height: 34)
+        } else {
+            Image(systemName: "macwindow")
+                .font(.system(size: 18))
+                .foregroundStyle(.secondary)
+                .frame(width: 34, height: 34)
+                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 9))
+        }
+    }
+
+    private func pickerTitle(_ window: TrackedWindow) -> String {
+        let title = window.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard title.isEmpty else { return title }
+        let siblings = model.windows.filter { $0.ownerPID == window.ownerPID }
+        let ordinal = (siblings.firstIndex(where: { $0.id == window.id }) ?? 0) + 1
+        return "제목 없는 창 \(ordinal)"
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 9) {
+            Image(systemName: "macwindow.badge.xmark")
+                .font(.system(size: 26))
+                .foregroundStyle(.orange)
+            Text(searchText.isEmpty ? "선택할 수 있는 창을 찾지 못했습니다" : "검색 결과가 없습니다")
+                .font(.callout.weight(.semibold))
+            Text(searchText.isEmpty ? "손쉬운 사용 권한을 확인한 뒤 새로고침하거나 3초 자동 선택을 사용하세요." : "다른 앱 이름이나 창 제목으로 검색해 보세요.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            if searchText.isEmpty && !model.accessibilityTrusted {
+                Button("손쉬운 사용 설정 열기") { model.requestAccessibilityPermission() }
+                    .buttonStyle(NFCPillButtonStyle())
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 130)
     }
 }
 

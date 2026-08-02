@@ -61,6 +61,12 @@ jobs:
         with:
           path: artifacts
       - name: Publish GitHub release
-        run: gh release create "$GITHUB_REF_NAME" artifacts/**/* --generate-notes --title "No Focus Count $GITHUB_REF_NAME"
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" artifacts/**/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" artifacts/**/* --generate-notes --title "No Focus Count $GITHUB_REF_NAME"
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}

@@ -37,6 +37,33 @@ struct FocusPolicyCheck {
             result: .targetUnavailable
         )
 
+        let movedMonitorSnapshot = snapshot(
+            pid: 100,
+            windowID: 42,
+            onScreen: true,
+            visible: 1,
+            targetMonitorID: 2
+        )
+        let movedMonitorResult = FocusPolicy.evaluate(
+            snapshot: movedMonitorSnapshot,
+            target: target,
+            minimumVisibleFraction: 0.65,
+            requiredMonitorID: 1
+        )
+        guard movedMonitorResult == .differentMonitor else {
+            fatalError("A target moved away from its selected monitor must pause focus")
+        }
+
+        let browserTarget = TrackedWindow(
+            id: 91,
+            ownerPID: 300,
+            appName: "Chrome",
+            bundleIdentifier: "com.google.Chrome",
+            title: "온라인 강의"
+        )
+        let changedTab = snapshot(pid: 300, windowID: 91, onScreen: true, visible: 1, windowTitle: "YouTube")
+        expect(changedTab, target: browserTarget, result: .differentTab)
+
         let untitled = TrackedWindow(
             id: 7,
             ownerPID: 101,
@@ -55,6 +82,13 @@ struct FocusPolicyCheck {
         guard ranking.map(\.name) == ["집중왕", "딴짓왕"] else {
             fatalError("Leaderboard must rank higher focus ratios first")
         }
+        guard ranking.first?.name == "집중왕" else {
+            fatalError("Focus ranking must keep the best participant first")
+        }
+        guard session(name: "나", focus: 20, distraction: 80, target: target)
+            .activityNarrative.contains("Browser · Video에서 1분 20초") else {
+            fatalError("Session history must preserve a readable activity trail")
+        }
 
         print("Core focus policy checks passed")
     }
@@ -70,7 +104,9 @@ struct FocusPolicyCheck {
         pid: Int32,
         windowID: UInt32,
         onScreen: Bool,
-        visible: Double
+        visible: Double,
+        targetMonitorID: UInt32? = nil,
+        windowTitle: String = "Window"
     ) -> ActivitySnapshot {
         ActivitySnapshot(
             capturedAt: Date(),
@@ -78,9 +114,10 @@ struct FocusPolicyCheck {
             frontmostAppName: "Test",
             frontmostBundleIdentifier: "test.app",
             frontmostWindowID: windowID,
-            frontmostWindowTitle: "Window",
+            frontmostWindowTitle: windowTitle,
             targetIsOnScreen: onScreen,
-            targetVisibleFraction: visible
+            targetVisibleFraction: visible,
+            targetMonitorID: targetMonitorID
         )
     }
 

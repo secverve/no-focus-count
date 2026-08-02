@@ -56,10 +56,11 @@
         </section>
 
         <section class="context-strip no-drag">
-          <label>
+          <div class="context-picker">
             <span>집중 창</span>
-            <select id="target-window"><option value="">창을 불러오는 중…</option></select>
-          </label>
+            <button id="open-window-switcher" type="button"><strong id="selected-window-label">창을 불러오는 중…</strong><small>ALT-TAB 방식으로 선택</small></button>
+            <select id="target-window" class="hidden-context-select" aria-hidden="true" tabindex="-1"><option value="">창을 불러오는 중…</option></select>
+          </div>
           <label>
             <span>집중 모니터</span>
             <select id="target-display"><option value="">모니터를 불러오는 중…</option></select>
@@ -176,6 +177,22 @@
         </section>
       </div>
     </main>
+
+    <dialog id="window-switcher" class="window-switcher no-drag">
+      <section class="switcher-shell">
+        <header class="switcher-header">
+          <div><strong>집중 창 선택기</strong><small>모니터를 고른 뒤 Tab 또는 ← → 로 창을 넘기세요</small></div>
+          <button id="switcher-close" type="button" aria-label="창 선택기 닫기">×</button>
+        </header>
+        <div id="switcher-displays" class="switcher-displays"></div>
+        <div id="switcher-windows" class="switcher-windows"></div>
+        <footer class="switcher-footer">
+          <span>ESC 닫기 · TAB 이동 · ENTER 선택</span>
+          <button id="switcher-refresh" type="button">새로고침</button>
+          <button id="switcher-confirm" class="primary" type="button">이 창으로 집중</button>
+        </footer>
+      </section>
+    </dialog>
     <script type="module" src="renderer.js"></script>
   </body>
 </html>

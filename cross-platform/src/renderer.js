@@ -6,6 +6,8 @@ let state;
 let context = { windows: [], displays: [] };
 let selectedMode = 'focus';
 let calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+let switcherDisplayId = null;
+let switcherWindowId = null;
 
 const reasonLabels = {
   ready: '준비',
@@ -24,6 +26,17 @@ const reasonLabels = {
 const formatTime = value => {
   const seconds = Math.max(0, Math.round(Number(value) || 0));
   return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+};
+
+const formatKoreanDuration = value => {
+  const seconds = Math.max(0, Math.round(Number(value) || 0));
+  if (seconds < 60) return `${seconds}초`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  if (minutes < 60) return remainder ? `${minutes}분 ${remainder}초` : `${minutes}분`;
+  const hours = Math.floor(minutes / 60);
+  const minuteRemainder = minutes % 60;
+  return minuteRemainder ? `${hours}시간 ${minuteRemainder}분` : `${hours}시간`;
 };
 
 const phaseLabel = phase => ({
@@ -181,17 +194,29 @@ function renderHistory() {
     item.append(summary);
     const events = document.createElement('div');
     events.className = 'event-list';
+    const narrative = document.createElement('p');
+    narrative.className = 'history-narrative';
     if (!session.events?.length) {
+      narrative.textContent = '이 세션에서는 다른 창으로 가지 않고 집중을 마쳤습니다.';
+      item.append(narrative);
       const empty = document.createElement('p');
       empty.textContent = '이탈 기록 없음';
       events.append(empty);
     } else {
+      const movements = session.events.slice(0, 5).map(event => {
+        const end = event.endedAt ? new Date(event.endedAt) : new Date();
+        const duration = Math.max(0, Math.round((end - new Date(event.startedAt)) / 1000));
+        return `${event.appName || '알 수 없는 앱'} · ${event.windowTitle || '제목 없음'}에서 ${formatKoreanDuration(duration)}`;
+      });
+      const remainder = session.events.length > 5 ? ` 외 ${session.events.length - 5}곳` : '';
+      narrative.textContent = `잘 집중하시다가 ${movements.join(' → ')}${remainder} 이동했습니다.`;
+      item.append(narrative);
       for (const event of session.events) {
         const row = document.createElement('p');
         const end = event.endedAt ? new Date(event.endedAt) : new Date();
         const duration = Math.max(0, Math.round((end - new Date(event.startedAt)) / 1000));
         const copyText = document.createElement('span');
-        copyText.textContent = `${reasonLabels[event.reason] ?? event.reason} · ${event.appName || '알 수 없는 앱'} · ${event.windowTitle || '제목 없음'} · ${formatTime(duration)}`;
+        copyText.textContent = `${new Date(event.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} → ${event.appName || '알 수 없는 앱'} · ${event.windowTitle || '제목 없음'} · ${formatKoreanDuration(duration)} · ${reasonLabels[event.reason] ?? event.reason}`;
         row.append(copyText);
         if (event.url) {
           const url = document.createElement('small');
@@ -225,6 +250,115 @@ function windowDetail(windowInfo, displayId) {
   if (!windowInfo) return '창을 선택하면 상세 정보가 표시됩니다';
   const display = displayForWindow(windowInfo) ?? context.displays.find(item => String(item.id) === String(displayId));
   return `${windowInfo.title || '제목 없음'} · ${display?.label ?? `모니터 ${displayId || '?'}`}`;
+}
+
+function updateSelectedWindowLabel() {
+  const windowInfo = context.windows.find(item => String(item.id) === String($('#target-window').value));
+  const label = $('#selected-window-label');
+  label.textContent = windowInfo
+    ? `${windowInfo.owner?.name ?? '앱'} · ${windowInfo.title || `창 #${windowInfo.id}`}`
+    : '집중 창을 선택하세요';
+}
+
+function switcherWindows() {
+  return context.windows.filter(windowInfo => {
+    const display = displayForWindow(windowInfo);
+    return display && String(display.id) === String(switcherDisplayId);
+  });
+}
+
+function renderWindowSwitcher() {
+  const displays = $('#switcher-displays');
+  displays.replaceChildren(...context.displays.map(display => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `switcher-display${String(display.id) === String(switcherDisplayId) ? ' selected' : ''}`;
+    const title = document.createElement('strong');
+    title.textContent = `${display.label}${display.primary ? ' · 메인' : ''}`;
+    const detail = document.createElement('small');
+    const count = context.windows.filter(windowInfo => String(displayForWindow(windowInfo)?.id) === String(display.id)).length;
+    detail.textContent = `${display.bounds.width}×${display.bounds.height} · 창 ${count}개`;
+    button.append(title, detail);
+    button.addEventListener('click', () => {
+      switcherDisplayId = String(display.id);
+      switcherWindowId = switcherWindows()[0]?.id ?? null;
+      renderWindowSwitcher();
+    });
+    return button;
+  }));
+
+  const candidates = switcherWindows();
+  if (!candidates.some(item => String(item.id) === String(switcherWindowId))) {
+    switcherWindowId = candidates[0]?.id ?? null;
+  }
+  const container = $('#switcher-windows');
+  if (!candidates.length) {
+    const empty = document.createElement('p');
+    empty.className = 'switcher-empty';
+    empty.textContent = '이 모니터에서 선택할 창이 없습니다. 창을 옮긴 뒤 새로고침해 주세요.';
+    container.replaceChildren(empty);
+  } else {
+    container.replaceChildren(...candidates.map(windowInfo => {
+      const selected = String(windowInfo.id) === String(switcherWindowId);
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = `switcher-window${selected ? ' selected' : ''}`;
+      card.dataset.windowId = String(windowInfo.id);
+      const preview = document.createElement('div');
+      preview.className = 'switcher-window-preview';
+      const initial = document.createElement('b');
+      initial.textContent = Array.from(windowInfo.owner?.name || '앱')[0]?.toUpperCase() || '앱';
+      preview.append(initial);
+      const copy = document.createElement('div');
+      copy.className = 'switcher-window-copy';
+      const appName = document.createElement('strong');
+      appName.textContent = windowInfo.owner?.name ?? '알 수 없는 앱';
+      const id = document.createElement('small');
+      id.textContent = `창 #${windowInfo.id}`;
+      const title = document.createElement('span');
+      title.textContent = windowInfo.title || '제목 없는 창';
+      copy.append(appName, id, title);
+      card.append(preview, copy);
+      card.addEventListener('click', () => {
+        switcherWindowId = windowInfo.id;
+        renderWindowSwitcher();
+      });
+      card.addEventListener('dblclick', confirmWindowSwitcher);
+      return card;
+    }));
+    requestAnimationFrame(() => container.querySelector('.switcher-window.selected')?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' }));
+  }
+  $('#switcher-confirm').disabled = !switcherWindowId;
+}
+
+async function openWindowSwitcher() {
+  await refreshContext();
+  switcherDisplayId = $('#target-display').value
+    || String(context.displays.find(item => item.primary)?.id ?? context.displays[0]?.id ?? '');
+  const currentWindowId = $('#target-window').value;
+  switcherWindowId = switcherWindows().some(item => String(item.id) === String(currentWindowId))
+    ? currentWindowId
+    : switcherWindows()[0]?.id ?? null;
+  renderWindowSwitcher();
+  $('#window-switcher').showModal();
+}
+
+function stepWindowSwitcher(delta) {
+  const candidates = switcherWindows();
+  if (!candidates.length) return;
+  const index = candidates.findIndex(item => String(item.id) === String(switcherWindowId));
+  switcherWindowId = candidates[(Math.max(0, index) + delta + candidates.length) % candidates.length].id;
+  renderWindowSwitcher();
+}
+
+function confirmWindowSwitcher() {
+  const selected = context.windows.find(item => String(item.id) === String(switcherWindowId));
+  if (!selected) return;
+  $('#target-window').value = String(selected.id);
+  $('#target-display').value = String(switcherDisplayId);
+  updateSelectedWindowLabel();
+  renderFocusInspector();
+  $('#window-switcher').close();
 }
 
 function renderFocusInspector() {
@@ -320,6 +454,7 @@ async function refreshContext() {
   else windowSelect.value = '';
   if (context.displays.some(item => item.id === oldDisplay)) displaySelect.value = oldDisplay;
   else if (context.displays[0]) displaySelect.value = context.displays.find(item => item.primary)?.id ?? context.displays[0].id;
+  updateSelectedWindowLabel();
   renderFocusInspector();
 }
 
@@ -331,7 +466,7 @@ async function startOrToggle() {
   const targetWindow = context.windows.find(item => item.id === $('#target-window').value);
   const targetDisplayId = $('#target-display').value || null;
   if (selectedMode === 'focus' && !targetWindow && !state.capabilities.waylandLimited) {
-    await refreshContext();
+    await openWindowSwitcher();
     return;
   }
   await window.nfc.startSession({
@@ -350,8 +485,37 @@ function bindDashboard() {
   $('#primary-action').addEventListener('click', startOrToggle);
   $('#stop-action').addEventListener('click', window.nfc.stopSession);
   $('#refresh-context').addEventListener('click', refreshContext);
-  $('#target-window').addEventListener('change', renderFocusInspector);
-  $('#target-display').addEventListener('change', renderFocusInspector);
+  $('#open-window-switcher').addEventListener('click', openWindowSwitcher);
+  $('#target-window').addEventListener('change', () => {
+    updateSelectedWindowLabel();
+    renderFocusInspector();
+  });
+  $('#target-display').addEventListener('change', () => {
+    const target = context.windows.find(item => String(item.id) === String($('#target-window').value));
+    if (target && String(displayForWindow(target)?.id) !== String($('#target-display').value)) {
+      $('#target-window').value = '';
+      updateSelectedWindowLabel();
+    }
+    renderFocusInspector();
+  });
+  $('#switcher-close').addEventListener('click', () => $('#window-switcher').close());
+  $('#switcher-refresh').addEventListener('click', async () => {
+    await refreshContext();
+    renderWindowSwitcher();
+  });
+  $('#switcher-confirm').addEventListener('click', confirmWindowSwitcher);
+  $('#window-switcher').addEventListener('keydown', event => {
+    if (event.key === 'Tab' || event.key === 'ArrowRight') {
+      event.preventDefault();
+      stepWindowSwitcher(event.shiftKey ? -1 : 1);
+    } else if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      stepWindowSwitcher(-1);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      confirmWindowSwitcher();
+    }
+  });
 
   $$('.mode-switch button').forEach(button => button.addEventListener('click', () => {
     if (state.runtime.currentSession) return;

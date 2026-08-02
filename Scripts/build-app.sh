@@ -22,6 +22,7 @@ swiftc \
   "$PROJECT_DIR/Sources/NoFocusCount/Models.swift" \
   "$PROJECT_DIR/Sources/NoFocusCount/NoFocusCountApp.swift" \
   "$PROJECT_DIR/Sources/NoFocusCount/SessionRepository.swift" \
+  "$PROJECT_DIR/Sources/NoFocusCount/WindowSwitcherView.swift" \
   -o "$MACOS_DIR/NoFocusCount"
 
 /bin/cp "$PROJECT_DIR/Resources/Info.plist" "$CONTENTS_DIR/Info.plist"

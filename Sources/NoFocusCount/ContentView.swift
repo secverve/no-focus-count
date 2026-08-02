@@ -77,6 +77,9 @@ struct ContentView: View {
 
             Spacer()
 
+            NFCIconButton(icon: "rectangle.on.rectangle.angled", help: "집중 창 선택기") {
+                model.showWindowSwitcher()
+            }
             NFCIconButton(icon: "rectangle.on.rectangle", help: "미니 타이머 열기") {
                 model.showMiniTimer()
             }
@@ -528,6 +531,45 @@ private struct WindowPickerView: View {
     private let columns = [GridItem(.adaptive(minimum: 230), spacing: 9)]
 
     var body: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(Color.nfcLime.opacity(0.09))
+                Image(systemName: "display.2")
+                    .font(.system(size: 21, weight: .semibold))
+                    .foregroundStyle(Color.nfcLime)
+            }
+            .frame(width: 48, height: 48)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("모니터와 집중 창")
+                    .font(.callout.weight(.semibold))
+                Text(model.selectedDisplay?.displayName ?? "모니터 선택 필요")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.nfcLime)
+                Text(model.selectedWindow?.identityLabel ?? "선택한 모니터의 창을 큰 미리보기로 고르세요")
+                    .font(.caption)
+                    .foregroundStyle(model.selectedWindow == nil ? Color.orange : Color.secondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 8)
+            Button {
+                model.showWindowSwitcher()
+            } label: {
+                Label("ALT-TAB 창 선택", systemImage: "rectangle.on.rectangle")
+            }
+            .buttonStyle(NFCPillButtonStyle(primary: true))
+            .disabled(model.currentSession != nil)
+        }
+        .padding(16)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.white.opacity(0.10), lineWidth: 0.8)
+        }
+    }
+
+    private var legacyPicker: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -778,15 +820,40 @@ private struct HistoryView: View {
                             ForEach(model.history) { session in
                                 DisclosureGroup {
                                     VStack(alignment: .leading, spacing: 8) {
+                                        HStack(alignment: .top, spacing: 9) {
+                                            Image(systemName: session.distractions.isEmpty ? "checkmark.seal.fill" : "point.topleft.down.to.point.bottomright.curvepath")
+                                                .foregroundStyle(session.distractions.isEmpty ? Color.nfcLime : Color.orange)
+                                            Text(session.activityNarrative)
+                                                .font(.callout)
+                                                .foregroundStyle(.secondary)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        }
+                                        .padding(12)
+                                        .background(Color.black.opacity(0.18), in: RoundedRectangle(cornerRadius: 12))
+
                                         if session.distractions.isEmpty {
                                             Text("이탈 기록 없음").foregroundStyle(.secondary)
                                         }
                                         ForEach(session.distractions) { event in
-                                            HStack(alignment: .top) {
+                                            HStack(alignment: .top, spacing: 10) {
+                                                VStack(alignment: .trailing, spacing: 3) {
+                                                    Text(event.startedAt.formatted(date: .omitted, time: .shortened))
+                                                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                                    Image(systemName: "arrow.down")
+                                                        .font(.system(size: 9))
+                                                }
+                                                .foregroundStyle(.tertiary)
+                                                .frame(width: 58, alignment: .trailing)
+
                                                 VStack(alignment: .leading, spacing: 2) {
-                                                    Text(event.appName).font(.callout.weight(.semibold))
+                                                    Text(event.destinationLabel).font(.callout.weight(.semibold)).lineLimit(2)
+                                                    Text("\(event.status.label) · \(event.duration.koreanDurationText) 머묾")
+                                                        .font(.caption2)
+                                                        .foregroundStyle(.orange)
                                                     if !event.windowTitle.isEmpty {
-                                                        Text(event.windowTitle).font(.caption).lineLimit(1)
+                                                        Text("이 창으로 이동한 기록")
+                                                            .font(.caption2)
+                                                            .foregroundStyle(.tertiary)
                                                     }
                                                     if let url = event.url {
                                                         Text(url).font(.caption2.monospaced()).foregroundStyle(.tertiary).lineLimit(2)
@@ -809,9 +876,10 @@ private struct HistoryView: View {
                                                     }
                                                 }
                                                 Spacer()
-                                                Text(event.duration.clockText)
+                                                Text(event.duration.koreanDurationText)
                                                     .font(.caption.monospacedDigit())
                                             }
+                                            .padding(.vertical, 5)
                                         }
                                     }
                                     .padding(.top, 10)
@@ -823,6 +891,9 @@ private struct HistoryView: View {
                                             Text(session.startedAt.shortDateTimeText)
                                                 .font(.caption)
                                                 .foregroundStyle(.secondary)
+                                            Text("\(session.target.appName) · \(session.targetMonitorName ?? session.target.monitorName ?? "모니터 미확인")")
+                                                .font(.caption2)
+                                                .foregroundStyle(.tertiary)
                                         }
                                         Spacer()
                                         Text("\(Int(session.focusScore))%")
@@ -842,7 +913,7 @@ private struct HistoryView: View {
             }
             .padding(24)
         }
-        .frame(width: 680, height: 600)
+        .frame(width: 760, height: 640)
         .preferredColorScheme(.dark)
     }
 }
@@ -951,6 +1022,7 @@ private struct NFCIconButton: View {
         .foregroundStyle(hovered ? Color.white : Color.secondary)
         .onHover { hovered = $0 }
         .help(help)
+        .accessibilityLabel(help)
     }
 }
 

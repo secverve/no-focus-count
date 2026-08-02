@@ -36,6 +36,59 @@ final class FocusPolicyTests: XCTestCase {
         XCTAssertEqual(FocusPolicy.evaluate(snapshot: snapshot, target: target, minimumVisibleFraction: 0.65), .targetUnavailable)
     }
 
+    func testTargetMovingOffSelectedMonitorPausesFocus() {
+        let snapshot = ActivitySnapshot(
+            capturedAt: Date(),
+            frontmostPID: 100,
+            frontmostAppName: "Study App",
+            frontmostBundleIdentifier: "test.study",
+            frontmostWindowID: 42,
+            frontmostWindowTitle: "Chapter 1",
+            targetIsOnScreen: true,
+            targetVisibleFraction: 1,
+            targetMonitorID: 2
+        )
+        XCTAssertEqual(
+            FocusPolicy.evaluate(
+                snapshot: snapshot,
+                target: target,
+                minimumVisibleFraction: 0.65,
+                requiredMonitorID: 1
+            ),
+            .differentMonitor
+        )
+    }
+
+    func testChangingBrowserTabInSameWindowPausesFocus() {
+        let browser = TrackedWindow(
+            id: 42,
+            ownerPID: 100,
+            appName: "Chrome",
+            bundleIdentifier: "com.google.Chrome",
+            title: "온라인 강의"
+        )
+        let snapshot = ActivitySnapshot(
+            capturedAt: Date(),
+            frontmostPID: 100,
+            frontmostAppName: "Chrome",
+            frontmostBundleIdentifier: "com.google.Chrome",
+            frontmostWindowID: 42,
+            frontmostWindowTitle: "YouTube",
+            targetIsOnScreen: true,
+            targetVisibleFraction: 1
+        )
+        XCTAssertEqual(
+            FocusPolicy.evaluate(snapshot: snapshot, target: browser, minimumVisibleFraction: 0.65),
+            .differentTab
+        )
+    }
+
+    func testSessionNarrativeKeepsWindowAndDuration() {
+        let session = makeSession(name: "나", focus: 60, distraction: 120)
+        XCTAssertTrue(session.activityNarrative.contains("Browser · Video"))
+        XCTAssertTrue(session.activityNarrative.contains("2분"))
+    }
+
     func testRunningChromeWindowsRemainSelectable() throws {
         let chromeIsRunning = NSWorkspace.shared.runningApplications.contains {
             $0.bundleIdentifier == "com.google.Chrome"

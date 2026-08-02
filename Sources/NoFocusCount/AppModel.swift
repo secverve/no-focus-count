@@ -4,7 +4,10 @@ import Foundation
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var windows: [TrackedWindow] = []
+    @Published private(set) var displays: [TrackedDisplay] = []
     @Published var selectedWindowID: UInt32?
+    @Published private(set) var selectedMonitorID: UInt32?
+    @Published var switcherWindowID: UInt32?
     @Published private(set) var phase: TimerPhase = .idle
     @Published private(set) var remainingFocusSeconds: TimeInterval = 25 * 60
     @Published private(set) var currentSession: FocusSession?
@@ -52,6 +55,7 @@ final class AppModel: ObservableObject {
         static let participantName = "participantName"
         static let captureFocusReceipts = "captureFocusReceipts"
         static let alarmEnabled = "alarmEnabled"
+        static let selectedMonitorID = "selectedMonitorID"
     }
 
     private let monitor: ActivityMonitor
@@ -63,6 +67,7 @@ final class AppModel: ObservableObject {
     private var graceUntil: Date?
     private var currentDistractionIndex: Int?
     private var miniTimerPanel: MiniTimerPanelController?
+    private var windowSwitcherPanel: WindowSwitcherPanelController?
     private var windowPickTask: Task<Void, Never>?
 
     init(
@@ -86,6 +91,7 @@ final class AppModel: ObservableObject {
         alarmEnabled = UserDefaults.standard.object(forKey: Keys.alarmEnabled) == nil
             ? true
             : UserDefaults.standard.bool(forKey: Keys.alarmEnabled)
+        selectedMonitorID = (UserDefaults.standard.object(forKey: Keys.selectedMonitorID) as? NSNumber)?.uint32Value
         remainingFocusSeconds = TimeInterval((storedMinutes == 0 ? 25 : storedMinutes) * 60)
         history = self.repository.sessions
         accessibilityTrusted = monitor.isAccessibilityTrusted
@@ -105,8 +111,20 @@ final class AppModel: ObservableObject {
         return windows.first { $0.id == selectedWindowID }
     }
 
+    var selectedDisplay: TrackedDisplay? {
+        guard let selectedMonitorID else { return nil }
+        return displays.first { $0.id == selectedMonitorID }
+    }
+
+    var windowsOnSelectedDisplay: [TrackedWindow] {
+        guard let selectedMonitorID else { return windows }
+        return windows.filter { $0.monitorID == selectedMonitorID }
+    }
+
     var canStart: Bool {
-        selectedWindow != nil && currentSession == nil
+        guard let selectedWindow, currentSession == nil else { return false }
+        guard let selectedMonitorID else { return true }
+        return selectedWindow.monitorID == selectedMonitorID
     }
 
     var localLeaderboard: [ParticipantStats] {
@@ -131,6 +149,14 @@ final class AppModel: ObservableObject {
 
     func refreshWindows() {
         let previousSelection = selectedWindowID
+        let previousMonitor = selectedMonitorID
+        displays = monitor.availableDisplays()
+        if let previousMonitor, displays.contains(where: { $0.id == previousMonitor }) {
+            selectedMonitorID = previousMonitor
+        } else {
+            selectedMonitorID = displays.first(where: \.isMain)?.id ?? displays.first?.id
+            persistSelectedMonitor()
+        }
         windows = monitor.availableWindows()
         if let previousSelection, windows.contains(where: { $0.id == previousSelection }) {
             selectedWindowID = previousSelection
@@ -141,12 +167,66 @@ final class AppModel: ObservableObject {
         refreshFocusDiagnostic()
     }
 
+    func selectDisplay(_ display: TrackedDisplay) {
+        guard currentSession == nil else { return }
+        selectedMonitorID = display.id
+        persistSelectedMonitor()
+        if let selectedWindow, selectedWindow.monitorID != display.id {
+            selectedWindowID = nil
+        }
+        switcherWindowID = windowsOnSelectedDisplay.first(where: { $0.isOnScreen != false })?.id
+            ?? windowsOnSelectedDisplay.first?.id
+        windowSwitcherPanel?.move(on: display.id)
+        refreshFocusDiagnostic()
+    }
+
     func selectWindow(_ window: TrackedWindow) {
+        if let monitorID = window.monitorID,
+           let display = displays.first(where: { $0.id == monitorID }) {
+            selectedMonitorID = display.id
+            persistSelectedMonitor()
+        }
         selectedWindowID = window.id
         let title = window.title.trimmingCharacters(in: .whitespacesAndNewlines)
         windowPickMessage = "\(window.appName) · \(title.isEmpty ? "창 #\(window.id)" : title) 선택 완료"
         windowPickError = false
         refreshFocusDiagnostic()
+    }
+
+    func showWindowSwitcher() {
+        guard currentSession == nil else { return }
+        refreshWindows()
+        let candidates = windowsOnSelectedDisplay
+        switcherWindowID = candidates.contains(where: { $0.id == selectedWindowID })
+            ? selectedWindowID
+            : (candidates.first(where: { $0.isOnScreen != false }) ?? candidates.first)?.id
+        if windowSwitcherPanel == nil {
+            windowSwitcherPanel = WindowSwitcherPanelController(model: self)
+        }
+        windowSwitcherPanel?.show(on: selectedMonitorID)
+    }
+
+    func closeWindowSwitcher() {
+        windowSwitcherPanel?.closeSwitcher()
+    }
+
+    func stepSwitcherSelection(by delta: Int) {
+        let candidates = windowsOnSelectedDisplay
+        guard !candidates.isEmpty else { return }
+        let currentIndex = candidates.firstIndex { $0.id == switcherWindowID } ?? 0
+        let nextIndex = (currentIndex + delta + candidates.count) % candidates.count
+        switcherWindowID = candidates[nextIndex].id
+    }
+
+    func confirmSwitcherSelection() {
+        guard let switcherWindowID,
+              let window = windows.first(where: { $0.id == switcherWindowID }) else { return }
+        selectWindow(window)
+        closeWindowSwitcher()
+    }
+
+    func windowPreviews(for windows: [TrackedWindow]) async -> [UInt32: NSImage] {
+        await receiptCapture.previews(windowIDs: windows.map(\.id))
     }
 
     func beginQuickWindowPick() {
@@ -172,6 +252,8 @@ final class AppModel: ObservableObject {
             if let pickedWindow,
                windows.contains(where: { $0.id == pickedWindow.id }) {
                 selectedWindowID = pickedWindow.id
+                selectedMonitorID = pickedWindow.monitorID
+                persistSelectedMonitor()
                 windowPickMessage = "\(pickedWindow.appName) · \(pickedWindow.title.isEmpty ? "제목 없는 창" : pickedWindow.title) 선택 완료"
                 windowPickError = false
             } else {
@@ -223,6 +305,8 @@ final class AppModel: ObservableObject {
             plannedFocusSeconds: plannedSeconds,
             completedFocusSeconds: 0,
             target: target,
+            targetMonitorID: selectedMonitorID,
+            targetMonitorName: selectedDisplay?.name,
             distractions: []
         )
         remainingFocusSeconds = plannedSeconds
@@ -295,7 +379,8 @@ final class AppModel: ObservableObject {
         let status = FocusPolicy.evaluate(
             snapshot: snapshot,
             target: session.target,
-            minimumVisibleFraction: minimumVisiblePercent / 100
+            minimumVisibleFraction: minimumVisiblePercent / 100,
+            requiredMonitorID: session.targetMonitorID
         )
         latestSnapshot = snapshot
         latestFocusStatus = status
@@ -335,7 +420,8 @@ final class AppModel: ObservableObject {
         latestFocusStatus = FocusPolicy.evaluate(
             snapshot: snapshot,
             target: target,
-            minimumVisibleFraction: minimumVisiblePercent / 100
+            minimumVisibleFraction: minimumVisiblePercent / 100,
+            requiredMonitorID: selectedMonitorID
         )
     }
 
@@ -425,5 +511,13 @@ final class AppModel: ObservableObject {
         }
         phase = completed ? .completed : .idle
         remainingFocusSeconds = completed ? 0 : TimeInterval(focusMinutes * 60)
+    }
+
+    private func persistSelectedMonitor() {
+        if let selectedMonitorID {
+            UserDefaults.standard.set(NSNumber(value: selectedMonitorID), forKey: Keys.selectedMonitorID)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Keys.selectedMonitorID)
+        }
     }
 }

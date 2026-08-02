@@ -54,6 +54,41 @@ final class FocusReceiptCapture {
         }
     }
 
+    @MainActor
+    func previews(windowIDs: [UInt32], maxWidth: Int = 520) async -> [UInt32: NSImage] {
+        guard hasPermission, !windowIDs.isEmpty else { return [:] }
+
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(
+                true,
+                onScreenWindowsOnly: true
+            )
+            let requestedIDs = Set(windowIDs)
+            let windows = content.windows.filter { requestedIDs.contains($0.windowID) }
+            var images: [UInt32: NSImage] = [:]
+
+            for window in windows {
+                let filter = SCContentFilter(desktopIndependentWindow: window)
+                let configuration = SCStreamConfiguration()
+                let aspectRatio = max(0.2, window.frame.height / max(1, window.frame.width))
+                configuration.width = maxWidth
+                configuration.height = max(150, Int(Double(maxWidth) * aspectRatio))
+                configuration.scalesToFit = true
+                configuration.showsCursor = false
+                configuration.ignoreShadowsSingleWindow = true
+                if let image = try? await SCScreenshotManager.captureImage(
+                    contentFilter: filter,
+                    configuration: configuration
+                ) {
+                    images[window.windowID] = NSImage(cgImage: image, size: .zero)
+                }
+            }
+            return images
+        } catch {
+            return [:]
+        }
+    }
+
     func deleteAll() {
         let fileManager = FileManager.default
         guard let files = try? fileManager.contentsOfDirectory(

@@ -1,4 +1,20 @@
+import CoreGraphics
 import Foundation
+
+struct TrackedDisplay: Identifiable {
+    let id: UInt32
+    let name: String
+    let bounds: CGRect
+    let isMain: Bool
+
+    var resolutionLabel: String {
+        "\(Int(bounds.width)) × \(Int(bounds.height))"
+    }
+
+    var displayName: String {
+        isMain ? "\(name) · 메인" : name
+    }
+}
 
 struct TrackedWindow: Identifiable, Hashable, Codable {
     let id: UInt32
@@ -6,6 +22,7 @@ struct TrackedWindow: Identifiable, Hashable, Codable {
     let appName: String
     let bundleIdentifier: String?
     let title: String
+    let monitorID: UInt32?
     let monitorName: String?
     let isOnScreen: Bool?
 
@@ -15,6 +32,7 @@ struct TrackedWindow: Identifiable, Hashable, Codable {
         appName: String,
         bundleIdentifier: String?,
         title: String,
+        monitorID: UInt32? = nil,
         monitorName: String? = nil,
         isOnScreen: Bool? = nil
     ) {
@@ -23,6 +41,7 @@ struct TrackedWindow: Identifiable, Hashable, Codable {
         self.appName = appName
         self.bundleIdentifier = bundleIdentifier
         self.title = title
+        self.monitorID = monitorID
         self.monitorName = monitorName
         self.isOnScreen = isOnScreen
     }
@@ -47,16 +66,20 @@ enum FocusStatus: String, Codable, Equatable {
     case focused
     case differentApplication
     case differentWindow
+    case differentTab
     case targetCovered
     case targetUnavailable
+    case differentMonitor
 
     var label: String {
         switch self {
         case .focused: "집중 중"
         case .differentApplication: "다른 앱 사용"
         case .differentWindow: "다른 창 사용"
+        case .differentTab: "브라우저 탭 변경"
         case .targetCovered: "집중 창이 가려짐"
         case .targetUnavailable: "집중 창을 찾을 수 없음"
+        case .differentMonitor: "선택 모니터를 벗어남"
         }
     }
 }
@@ -70,7 +93,9 @@ struct ActivitySnapshot: Equatable {
     let frontmostWindowTitle: String
     let targetIsOnScreen: Bool
     let targetVisibleFraction: Double
+    let targetMonitorID: UInt32?
     let frontmostMonitorName: String?
+    let frontmostMonitorID: UInt32?
 
     init(
         capturedAt: Date,
@@ -81,7 +106,9 @@ struct ActivitySnapshot: Equatable {
         frontmostWindowTitle: String,
         targetIsOnScreen: Bool,
         targetVisibleFraction: Double,
-        frontmostMonitorName: String? = nil
+        targetMonitorID: UInt32? = nil,
+        frontmostMonitorName: String? = nil,
+        frontmostMonitorID: UInt32? = nil
     ) {
         self.capturedAt = capturedAt
         self.frontmostPID = frontmostPID
@@ -91,7 +118,9 @@ struct ActivitySnapshot: Equatable {
         self.frontmostWindowTitle = frontmostWindowTitle
         self.targetIsOnScreen = targetIsOnScreen
         self.targetVisibleFraction = targetVisibleFraction
+        self.targetMonitorID = targetMonitorID
         self.frontmostMonitorName = frontmostMonitorName
+        self.frontmostMonitorID = frontmostMonitorID
     }
 }
 
@@ -99,13 +128,36 @@ enum FocusPolicy {
     static func evaluate(
         snapshot: ActivitySnapshot,
         target: TrackedWindow,
-        minimumVisibleFraction: Double
+        minimumVisibleFraction: Double,
+        requiredMonitorID: UInt32? = nil
     ) -> FocusStatus {
         guard snapshot.targetIsOnScreen else { return .targetUnavailable }
+        if let requiredMonitorID,
+           snapshot.targetMonitorID != requiredMonitorID {
+            return .differentMonitor
+        }
         guard snapshot.frontmostPID == target.ownerPID else { return .differentApplication }
         guard snapshot.frontmostWindowID == target.id else { return .differentWindow }
+        if isBrowser(bundleIdentifier: target.bundleIdentifier),
+           !target.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !snapshot.frontmostWindowTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           target.title != snapshot.frontmostWindowTitle {
+            return .differentTab
+        }
         guard snapshot.targetVisibleFraction >= minimumVisibleFraction else { return .targetCovered }
         return .focused
+    }
+
+    private static func isBrowser(bundleIdentifier: String?) -> Bool {
+        guard let bundleIdentifier else { return false }
+        return [
+            "com.apple.Safari",
+            "com.google.Chrome",
+            "com.google.Chrome.canary",
+            "com.brave.Browser",
+            "com.microsoft.edgemac",
+            "org.mozilla.firefox"
+        ].contains(bundleIdentifier)
     }
 }
 
@@ -123,6 +175,11 @@ struct DistractionEvent: Identifiable, Codable, Equatable {
     var duration: TimeInterval {
         max(0, (endedAt ?? Date()).timeIntervalSince(startedAt))
     }
+
+    var destinationLabel: String {
+        let cleanTitle = windowTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleanTitle.isEmpty ? appName : "\(appName) · \(cleanTitle)"
+    }
 }
 
 struct FocusSession: Identifiable, Codable, Equatable {
@@ -133,6 +190,8 @@ struct FocusSession: Identifiable, Codable, Equatable {
     let plannedFocusSeconds: TimeInterval
     var completedFocusSeconds: TimeInterval
     let target: TrackedWindow
+    var targetMonitorID: UInt32? = nil
+    var targetMonitorName: String? = nil
     var distractions: [DistractionEvent]
 
     var distractionCount: Int { distractions.count }
@@ -150,6 +209,17 @@ struct FocusSession: Identifiable, Codable, Equatable {
         let measured = completedFocusSeconds + totalDistractionSeconds
         guard measured > 0 else { return completedFocusSeconds > 0 ? 100 : 0 }
         return min(100, max(0, completedFocusSeconds / measured * 100))
+    }
+
+    var activityNarrative: String {
+        guard !distractions.isEmpty else {
+            return "이 세션에서는 다른 창으로 가지 않고 집중을 마쳤습니다."
+        }
+        let movements = distractions.prefix(5).map {
+            "\($0.destinationLabel)에서 \($0.duration.koreanDurationText)"
+        }
+        let remainder = distractions.count > 5 ? " 외 \(distractions.count - 5)곳" : ""
+        return "잘 집중하시다가 " + movements.joined(separator: " → ") + remainder + " 이동했습니다."
     }
 }
 
@@ -232,6 +302,19 @@ extension TimeInterval {
     var clockText: String {
         let value = max(0, Int(self.rounded()))
         return String(format: "%02d:%02d", value / 60, value % 60)
+    }
+
+    var koreanDurationText: String {
+        let seconds = max(0, Int(rounded()))
+        if seconds < 60 { return "\(seconds)초" }
+        let minutes = seconds / 60
+        let remainder = seconds % 60
+        if minutes < 60 {
+            return remainder == 0 ? "\(minutes)분" : "\(minutes)분 \(remainder)초"
+        }
+        let hours = minutes / 60
+        let minuteRemainder = minutes % 60
+        return minuteRemainder == 0 ? "\(hours)시간" : "\(hours)시간 \(minuteRemainder)분"
     }
 }
 

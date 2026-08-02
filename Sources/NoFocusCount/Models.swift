@@ -8,7 +8,9 @@ struct TrackedWindow: Identifiable, Hashable, Codable {
     let title: String
 
     var displayName: String {
-        title.isEmpty ? appName : "\(appName) — \(title)"
+        title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "\(appName) — 제목 없는 창 #\(id)"
+            : "\(appName) — \(title)"
     }
 }
 

@@ -33,6 +33,7 @@ struct ContentView: View {
         }
         .frame(minWidth: 720, minHeight: 720)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear { model.refreshWindows() }
         .confirmationDialog("모든 집중 기록을 삭제할까요?", isPresented: $showDeleteConfirmation) {
             Button("모두 삭제", role: .destructive) { model.deleteHistory() }
         }
@@ -135,6 +136,16 @@ struct ContentView: View {
                         Image(systemName: "arrow.clockwise")
                     }
                     .help("창 목록 새로고침")
+                }
+
+                if model.windows.isEmpty {
+                    Label("감지된 창이 없습니다. 공부할 앱의 창을 화면에 띄운 뒤 새로고침을 눌러주세요.", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                } else {
+                    Text("현재 선택 가능한 창 \(model.windows.count)개")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Stepper("집중 시간: \(model.focusMinutes)분", value: $model.focusMinutes, in: 5...120, step: 5)

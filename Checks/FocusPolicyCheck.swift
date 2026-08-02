@@ -32,6 +32,17 @@ struct FocusPolicyCheck {
             result: .targetUnavailable
         )
 
+        let untitled = TrackedWindow(
+            id: 7,
+            ownerPID: 101,
+            appName: "Browser",
+            bundleIdentifier: "test.browser",
+            title: ""
+        )
+        guard untitled.displayName == "Browser — 제목 없는 창 #7" else {
+            fatalError("Untitled windows must remain selectable")
+        }
+
         print("Core focus policy checks passed")
     }
 

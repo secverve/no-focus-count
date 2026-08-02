@@ -25,7 +25,9 @@ final class ActivityMonitor {
     func availableWindows() -> [TrackedWindow] {
         windowRecords()
             .filter { $0.ownerPID != ProcessInfo.processInfo.processIdentifier }
-            .filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .filter {
+                NSRunningApplication(processIdentifier: $0.ownerPID)?.activationPolicy == .regular
+            }
             .map {
                 TrackedWindow(
                     id: $0.id,

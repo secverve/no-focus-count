@@ -43,6 +43,14 @@ struct FocusPolicyCheck {
             fatalError("Untitled windows must remain selectable")
         }
 
+        let ranking = LeaderboardCalculator.rankings(from: [
+            session(name: "딴짓왕", focus: 20, distraction: 80, target: target),
+            session(name: "집중왕", focus: 90, distraction: 10, target: target)
+        ])
+        guard ranking.map(\.name) == ["집중왕", "딴짓왕"] else {
+            fatalError("Leaderboard must rank higher focus ratios first")
+        }
+
         print("Core focus policy checks passed")
     }
 
@@ -68,6 +76,36 @@ struct FocusPolicyCheck {
             frontmostWindowTitle: "Window",
             targetIsOnScreen: onScreen,
             targetVisibleFraction: visible
+        )
+    }
+
+    private static func session(
+        name: String,
+        focus: TimeInterval,
+        distraction: TimeInterval,
+        target: TrackedWindow
+    ) -> FocusSession {
+        let end = Date()
+        return FocusSession(
+            id: UUID(),
+            startedAt: end.addingTimeInterval(-(focus + distraction)),
+            endedAt: end,
+            participantName: name,
+            plannedFocusSeconds: 100,
+            completedFocusSeconds: focus,
+            target: target,
+            distractions: [
+                DistractionEvent(
+                    id: UUID(),
+                    startedAt: end.addingTimeInterval(-distraction),
+                    endedAt: end,
+                    status: .differentApplication,
+                    appName: "Browser",
+                    bundleIdentifier: "test.browser",
+                    windowTitle: "Video",
+                    url: nil
+                )
+            ]
         )
     }
 }

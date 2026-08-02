@@ -21,9 +21,11 @@
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
-    <string>13.0</string>
+    <string>14.0</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>사용자가 URL 기록에 동의한 경우 브라우저의 현재 탭 주소를 로컬 집중 기록에 저장합니다.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>사용자가 Focus Receipt에 동의한 경우 2초 이상 이어진 이탈 창의 저해상도 썸네일 한 장을 로컬 세션에 저장합니다.</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 secverve</string>
     <key>NSPrincipalClass</key>

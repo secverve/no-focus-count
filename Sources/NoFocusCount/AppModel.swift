@@ -11,6 +11,11 @@ final class AppModel: ObservableObject {
     @Published private(set) var lastSessionSummary: FocusSession?
     @Published private(set) var history: [FocusSession]
     @Published private(set) var accessibilityTrusted = false
+    @Published private(set) var screenCaptureTrusted = false
+
+    @Published var participantName: String {
+        didSet { UserDefaults.standard.set(participantName, forKey: Keys.participantName) }
+    }
 
     @Published var focusMinutes: Int {
         didSet {
@@ -27,31 +32,58 @@ final class AppModel: ObservableObject {
         didSet { UserDefaults.standard.set(recordBrowserURLs, forKey: Keys.recordBrowserURLs) }
     }
 
+    @Published var captureFocusReceipts: Bool {
+        didSet { UserDefaults.standard.set(captureFocusReceipts, forKey: Keys.captureFocusReceipts) }
+    }
+
+    @Published var alarmEnabled: Bool {
+        didSet { UserDefaults.standard.set(alarmEnabled, forKey: Keys.alarmEnabled) }
+    }
+
     private enum Keys {
         static let focusMinutes = "focusMinutes"
         static let minimumVisiblePercent = "minimumVisiblePercent"
         static let recordBrowserURLs = "recordBrowserURLs"
+        static let participantName = "participantName"
+        static let captureFocusReceipts = "captureFocusReceipts"
+        static let alarmEnabled = "alarmEnabled"
     }
 
     private let monitor: ActivityMonitor
     private let repository: SessionRepository
+    private let receiptCapture: FocusReceiptCapture
+    private let focusAlarm: FocusAlarm
     private var timer: Timer?
     private var lastTick = Date()
     private var graceUntil: Date?
     private var currentDistractionIndex: Int?
+    private var miniTimerPanel: MiniTimerPanelController?
 
-    init(monitor: ActivityMonitor = ActivityMonitor(), repository: SessionRepository? = nil) {
+    init(
+        monitor: ActivityMonitor = ActivityMonitor(),
+        repository: SessionRepository? = nil,
+        receiptCapture: FocusReceiptCapture = FocusReceiptCapture(),
+        focusAlarm: FocusAlarm = FocusAlarm()
+    ) {
         self.monitor = monitor
         self.repository = repository ?? SessionRepository()
+        self.receiptCapture = receiptCapture
+        self.focusAlarm = focusAlarm
 
         let storedMinutes = UserDefaults.standard.integer(forKey: Keys.focusMinutes)
         focusMinutes = storedMinutes == 0 ? 25 : storedMinutes
         let storedVisibility = UserDefaults.standard.double(forKey: Keys.minimumVisiblePercent)
         minimumVisiblePercent = storedVisibility == 0 ? 65 : storedVisibility
         recordBrowserURLs = UserDefaults.standard.bool(forKey: Keys.recordBrowserURLs)
+        participantName = UserDefaults.standard.string(forKey: Keys.participantName) ?? "나"
+        captureFocusReceipts = UserDefaults.standard.bool(forKey: Keys.captureFocusReceipts)
+        alarmEnabled = UserDefaults.standard.object(forKey: Keys.alarmEnabled) == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: Keys.alarmEnabled)
         remainingFocusSeconds = TimeInterval((storedMinutes == 0 ? 25 : storedMinutes) * 60)
         history = self.repository.sessions
         accessibilityTrusted = monitor.isAccessibilityTrusted
+        screenCaptureTrusted = receiptCapture.hasPermission
 
         refreshWindows()
         startPolling()
@@ -70,6 +102,26 @@ final class AppModel: ObservableObject {
         selectedWindow != nil && currentSession == nil
     }
 
+    var localLeaderboard: [ParticipantStats] {
+        LeaderboardCalculator.rankings(from: history)
+    }
+
+    var focusCombo: Int {
+        var count = 0
+        for session in history {
+            guard session.focusScore >= 80 else { break }
+            count += 1
+        }
+        return count
+    }
+
+    var latestCommentary: String {
+        guard let session = lastSessionSummary ?? history.first else {
+            return "첫 세션을 끝내면 No Focus Count가 솔직한 한마디를 남겨드려요."
+        }
+        return FocusCommentary.message(for: session.focusScore, distractionCount: session.distractionCount)
+    }
+
     func refreshWindows() {
         windows = monitor.availableWindows()
         if selectedWindow == nil {
@@ -85,6 +137,25 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func requestScreenCapturePermission() {
+        screenCaptureTrusted = receiptCapture.requestPermission()
+        if !screenCaptureTrusted,
+           let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    func showMiniTimer() {
+        if miniTimerPanel == nil {
+            miniTimerPanel = MiniTimerPanelController(model: self)
+        }
+        miniTimerPanel?.show()
+    }
+
+    func requestAlarmPermission() {
+        focusAlarm.requestNotificationPermission()
+    }
+
     func startSession() {
         guard let target = selectedWindow else { return }
         let plannedSeconds = TimeInterval(focusMinutes * 60)
@@ -92,6 +163,7 @@ final class AppModel: ObservableObject {
             id: UUID(),
             startedAt: Date(),
             endedAt: nil,
+            participantName: participantName,
             plannedFocusSeconds: plannedSeconds,
             completedFocusSeconds: 0,
             target: target,
@@ -133,6 +205,7 @@ final class AppModel: ObservableObject {
 
     func deleteHistory() {
         repository.deleteAll()
+        receiptCapture.deleteAll()
         history = []
         lastSessionSummary = nil
     }
@@ -147,6 +220,7 @@ final class AppModel: ObservableObject {
     private func tick() {
         let now = Date()
         accessibilityTrusted = monitor.isAccessibilityTrusted
+        screenCaptureTrusted = receiptCapture.hasPermission
 
         guard var session = currentSession else {
             lastTick = now
@@ -220,6 +294,32 @@ final class AppModel: ObservableObject {
         session.distractions.append(event)
         currentDistractionIndex = session.distractions.indices.last
         currentSession = session
+
+        if captureFocusReceipts,
+           let windowID = snapshot.frontmostWindowID {
+            scheduleFocusReceipt(eventID: event.id, windowID: windowID)
+        }
+    }
+
+    private func scheduleFocusReceipt(eventID: UUID, windowID: UInt32) {
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard let self,
+                  self.captureFocusReceipts,
+                  let index = self.currentDistractionIndex,
+                  let session = self.currentSession,
+                  session.distractions.indices.contains(index),
+                  session.distractions[index].id == eventID else { return }
+
+            guard let path = await self.receiptCapture.capture(windowID: windowID, eventID: eventID),
+                  var updatedSession = self.currentSession,
+                  updatedSession.distractions.indices.contains(index),
+                  updatedSession.distractions[index].id == eventID else { return }
+
+            updatedSession.distractions[index].visualReceiptPath = path
+            self.currentSession = updatedSession
+            self.screenCaptureTrusted = self.receiptCapture.hasPermission
+        }
     }
 
     private func closeCurrentDistraction(at date: Date) {
@@ -244,6 +344,9 @@ final class AppModel: ObservableObject {
         repository.add(session)
         history = repository.sessions
         lastSessionSummary = session
+        if completed && alarmEnabled {
+            focusAlarm.fire(participantName: session.participantDisplayName)
+        }
         phase = completed ? .completed : .idle
         remainingFocusSeconds = completed ? 0 : TimeInterval(focusMinutes * 60)
     }

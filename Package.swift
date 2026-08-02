@@ -5,7 +5,7 @@ import PackageDescription
 let package = Package(
     name: "NoFocusCount",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v14)
     ],
     products: [
         .executable(name: "NoFocusCount", targets: ["NoFocusCount"])

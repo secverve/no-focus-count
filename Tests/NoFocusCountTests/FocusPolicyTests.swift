@@ -30,6 +30,39 @@ final class FocusPolicyTests: XCTestCase {
         XCTAssertEqual(FocusPolicy.evaluate(snapshot: snapshot, target: target, minimumVisibleFraction: 0.65), .targetUnavailable)
     }
 
+    func testLeaderboardOrdersHigherFocusRatioFirst() {
+        let focused = makeSession(name: "집중왕", focus: 90, distraction: 10)
+        let distracted = makeSession(name: "딴짓왕", focus: 20, distraction: 80)
+
+        let ranking = LeaderboardCalculator.rankings(from: [distracted, focused])
+
+        XCTAssertEqual(ranking.map(\.name), ["집중왕", "딴짓왕"])
+    }
+
+    private func makeSession(name: String, focus: TimeInterval, distraction: TimeInterval) -> FocusSession {
+        FocusSession(
+            id: UUID(),
+            startedAt: Date(),
+            endedAt: Date(),
+            participantName: name,
+            plannedFocusSeconds: 100,
+            completedFocusSeconds: focus,
+            target: target,
+            distractions: [
+                DistractionEvent(
+                    id: UUID(),
+                    startedAt: Date(timeIntervalSinceNow: -distraction),
+                    endedAt: Date(),
+                    status: .differentApplication,
+                    appName: "Browser",
+                    bundleIdentifier: "test.browser",
+                    windowTitle: "Video",
+                    url: nil
+                )
+            ]
+        )
+    }
+
     private func makeSnapshot(
         pid: Int32,
         windowID: UInt32,

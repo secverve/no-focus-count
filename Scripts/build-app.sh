@@ -16,6 +16,9 @@ swiftc \
   "$PROJECT_DIR/Sources/NoFocusCount/ActivityMonitor.swift" \
   "$PROJECT_DIR/Sources/NoFocusCount/AppModel.swift" \
   "$PROJECT_DIR/Sources/NoFocusCount/ContentView.swift" \
+  "$PROJECT_DIR/Sources/NoFocusCount/FocusReceiptCapture.swift" \
+  "$PROJECT_DIR/Sources/NoFocusCount/FocusAlarm.swift" \
+  "$PROJECT_DIR/Sources/NoFocusCount/MiniTimerView.swift" \
   "$PROJECT_DIR/Sources/NoFocusCount/Models.swift" \
   "$PROJECT_DIR/Sources/NoFocusCount/NoFocusCountApp.swift" \
   "$PROJECT_DIR/Sources/NoFocusCount/SessionRepository.swift" \

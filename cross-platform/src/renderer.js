@@ -1,0 +1,431 @@
+const $ = selector => document.querySelector(selector);
+const $$ = selector => [...document.querySelectorAll(selector)];
+const isOverlay = new URLSearchParams(location.search).get('overlay') === '1';
+
+let state;
+let context = { windows: [], displays: [] };
+let selectedMode = 'focus';
+let calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+
+const formatTime = value => {
+  const seconds = Math.max(0, Math.round(Number(value) || 0));
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+};
+
+const phaseLabel = phase => ({
+  idle: 'READY',
+  focusing: 'FOCUSING',
+  break: 'BREAK',
+  'paused-user': 'PAUSED',
+  'paused-distraction': 'DISTRACTED',
+  completed: 'COMPLETE'
+}[phase] ?? phase.toUpperCase());
+
+function applyTheme(theme) {
+  const root = document.documentElement;
+  root.style.setProperty('--timer', theme.timerColor);
+  root.style.setProperty('--accent', theme.accentColor);
+  root.style.setProperty('--panel', theme.panelColor);
+  root.style.setProperty('--panel-opacity', theme.panelOpacity);
+  root.style.setProperty('--overlay-opacity', theme.overlayOpacity);
+  root.style.setProperty('--blur', `${theme.blur}px`);
+  root.style.setProperty('--timer-size', `${theme.timerSize}px`);
+  root.style.setProperty('--overlay-timer-size', `${theme.overlayTimerSize}px`);
+  root.style.setProperty('--shadow', theme.shadowStrength);
+}
+
+function renderOverlay() {
+  applyTheme(state.settings.theme);
+  $('#overlay-time').textContent = formatTime(state.runtime.remainingSeconds);
+  $('#overlay-mode').textContent = state.runtime.mode === 'break' ? 'BREAK' : 'FOCUS';
+  $('#overlay-status span').textContent = phaseLabel(state.runtime.phase);
+  $('#overlay-pause').textContent = state.runtime.phase === 'paused-user' ? '▶' : 'Ⅱ';
+  $('#overlay-stop').style.display = state.runtime.currentSession ? '' : 'none';
+}
+
+function setValue(id, value) {
+  const element = $(id);
+  if (element && document.activeElement !== element) element.value = value;
+}
+
+function renderDashboard() {
+  applyTheme(state.settings.theme);
+  const runtime = state.runtime;
+  const session = runtime.currentSession ?? state.history[0];
+  selectedMode = runtime.currentSession?.mode ?? selectedMode ?? runtime.suggestedMode;
+
+  $('#timer-number').textContent = formatTime(runtime.remainingSeconds);
+  $('#phase-line span').textContent = phaseLabel(runtime.phase);
+  $$('.mode-switch button').forEach(button => button.classList.toggle('active', button.dataset.mode === selectedMode));
+  $('#primary-action').textContent = runtime.currentSession
+    ? (runtime.phase === 'paused-user' ? 'RESUME' : 'PAUSE')
+    : (selectedMode === 'break' ? 'START BREAK' : 'START FOCUS');
+  $('#stop-action').style.display = runtime.currentSession ? '' : 'none';
+
+  const todayMinutes = Math.floor(state.analytics.todayFocusSeconds / 60);
+  const goalMinutes = Math.round(state.analytics.dailyGoalSeconds / 60);
+  $('#today-focus').textContent = `${todayMinutes}분`;
+  $('#daily-goal').textContent = `${goalMinutes}분`;
+  $('#goal-progress').style.width = `${Math.min(100, (state.analytics.todayFocusSeconds / Math.max(1, state.analytics.dailyGoalSeconds)) * 100)}%`;
+
+  $('#metric-focused').textContent = formatTime(session?.focusedSeconds ?? 0);
+  $('#metric-distractions').textContent = String(session?.events?.length ?? 0);
+  $('#metric-lost').textContent = formatTime(session?.distractionSeconds ?? 0);
+  $('#metric-cycles').textContent = String(runtime.completedCycles);
+  $('#wayland-warning').hidden = !state.capabilities.waylandLimited;
+
+  const settings = state.settings;
+  setValue('#participant-name', settings.participantName);
+  setValue('#focus-minutes', settings.focusMinutes);
+  setValue('#break-minutes', settings.breakMinutes);
+  setValue('#long-break-minutes', settings.longBreakMinutes);
+  setValue('#long-break-cycle', settings.cyclesBeforeLongBreak);
+  setValue('#daily-goal-minutes', settings.dailyGoalMinutes);
+  setValue('#idle-threshold', settings.idleThresholdSeconds);
+  $('#window-lock').checked = settings.windowLockEnabled;
+  $('#monitor-lock').checked = settings.monitorLockEnabled;
+  $('#tab-lock').checked = settings.tabLockEnabled;
+  $('#screen-inactive').checked = settings.pauseWhenScreenInactive;
+  $('#record-urls').checked = settings.recordUrls;
+  $('#alarm-enabled').checked = settings.alarmEnabled;
+  $('#auto-overlay').checked = settings.autoOpenOverlay;
+
+  setValue('#timer-color', settings.theme.timerColor);
+  setValue('#accent-color', settings.theme.accentColor);
+  setValue('#panel-color', settings.theme.panelColor);
+  setRange('#panel-opacity', settings.theme.panelOpacity, `${Math.round(settings.theme.panelOpacity * 100)}%`);
+  setRange('#overlay-opacity', settings.theme.overlayOpacity, `${Math.round(settings.theme.overlayOpacity * 100)}%`);
+  setRange('#theme-blur', settings.theme.blur, `${settings.theme.blur}px`);
+  setRange('#timer-size', settings.theme.timerSize, `${settings.theme.timerSize}px`);
+  setRange('#shadow-strength', settings.theme.shadowStrength, Number(settings.theme.shadowStrength).toFixed(2));
+
+  setValue('#sync-endpoint', settings.sync.endpoint ?? '');
+  setValue('#sync-account', settings.sync.accountId ?? '');
+  $('#sync-token').placeholder = settings.sync.hasToken ? '토큰 저장됨' : '접근 토큰';
+  renderHistory();
+  renderCalendar();
+}
+
+function setRange(selector, value, output) {
+  const element = $(selector);
+  if (document.activeElement !== element) element.value = value;
+  element.closest('label').querySelector('output').textContent = output;
+}
+
+function renderHistory() {
+  const focusSessions = state.history.filter(session => session.mode === 'focus');
+  const participants = new Map();
+  for (const session of focusSessions) {
+    const name = session.participantName || '나';
+    const row = participants.get(name) ?? { name, focusedSeconds: 0, distractionSeconds: 0, sessions: 0 };
+    row.focusedSeconds += Number(session.focusedSeconds) || 0;
+    row.distractionSeconds += Number(session.distractionSeconds) || 0;
+    row.sessions += 1;
+    participants.set(name, row);
+  }
+  const ranking = [...participants.values()].map(row => ({
+    ...row,
+    score: Math.round((row.focusedSeconds / Math.max(1, row.focusedSeconds + row.distractionSeconds)) * 100)
+  })).sort((a, b) => b.score - a.score || b.focusedSeconds - a.focusedSeconds);
+  const best = ranking[0];
+  const worst = ranking.at(-1);
+  $('#best-name').textContent = best?.name ?? '-';
+  $('#best-score').textContent = best ? `${best.score}% · ${Math.round(best.focusedSeconds / 60)}분` : '기록 없음';
+  $('#worst-name').textContent = worst?.name ?? '-';
+  $('#worst-score').textContent = worst ? `${worst.score}% · 이탈 ${Math.round(worst.distractionSeconds / 60)}분` : '기록 없음';
+  $('#focus-nudge').textContent = !worst
+    ? '첫 집중 세션을 시작해 보세요.'
+    : worst.score < 40
+      ? '오늘은 알림과 방해 탭을 줄이고 짧은 세션부터 다시 시작해 봐요.'
+      : worst.score < 70
+        ? '조금 흔들렸지만 괜찮아요. 다음 한 세션만 더 또렷하게.'
+        : '좋은 리듬이에요. 다음 휴식도 꼭 챙기세요.';
+
+  $('#history-count').textContent = `${state.history.length} sessions`;
+  $('#history-list').replaceChildren(...state.history.slice(0, 100).map(session => {
+    const total = (session.focusedSeconds ?? 0) + (session.distractionSeconds ?? 0);
+    const score = total > 0 ? Math.round((session.focusedSeconds / total) * 100) : 0;
+    const item = document.createElement('details');
+    item.className = 'history-item';
+    const summary = document.createElement('summary');
+    const copy = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = `${session.participantName || '나'} · ${session.mode === 'break' ? '휴식' : '집중'} ${formatTime(session.focusedSeconds)}`;
+    const detail = document.createElement('small');
+    detail.textContent = `${new Date(session.startedAt).toLocaleString()} · 이탈 ${session.events?.length ?? 0}회 · 손실 ${formatTime(session.distractionSeconds)}`;
+    copy.append(title, detail);
+    const badge = document.createElement('span');
+    badge.className = 'history-score';
+    badge.textContent = session.mode === 'focus' ? `${score}%` : 'REST';
+    summary.append(copy, badge);
+    item.append(summary);
+    const events = document.createElement('div');
+    events.className = 'event-list';
+    const reasonLabels = {
+      'left-monitor': '모니터 이탈',
+      'different-window': '다른 창',
+      'different-tab': '탭 변경',
+      'screen-inactive': '잠금·절전·유휴',
+      'window-unavailable': '집중 창 닫힘'
+    };
+    if (!session.events?.length) {
+      const empty = document.createElement('p');
+      empty.textContent = '이탈 기록 없음';
+      events.append(empty);
+    } else {
+      for (const event of session.events) {
+        const row = document.createElement('p');
+        const end = event.endedAt ? new Date(event.endedAt) : new Date();
+        const duration = Math.max(0, Math.round((end - new Date(event.startedAt)) / 1000));
+        const copyText = document.createElement('span');
+        copyText.textContent = `${reasonLabels[event.reason] ?? event.reason} · ${event.appName || '알 수 없는 앱'} · ${event.windowTitle || '제목 없음'} · ${formatTime(duration)}`;
+        row.append(copyText);
+        if (event.url) {
+          const url = document.createElement('small');
+          url.textContent = event.url;
+          row.append(url);
+        }
+        events.append(row);
+      }
+    }
+    item.append(events);
+    return item;
+  }));
+}
+
+function dateKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function focusByDay() {
+  const result = {};
+  for (const session of state.history) {
+    if (session.mode !== 'focus') continue;
+    const key = dateKey(new Date(session.startedAt));
+    result[key] ??= { focusSeconds: 0, distractionSeconds: 0, sessions: 0 };
+    result[key].focusSeconds += Number(session.focusedSeconds) || 0;
+    result[key].distractionSeconds += Number(session.distractionSeconds) || 0;
+    result[key].sessions += 1;
+  }
+  return result;
+}
+
+function renderCalendar() {
+  const year = calendarCursor.getFullYear();
+  const month = calendarCursor.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const leading = new Date(year, month, 1).getDay();
+  const data = focusByDay();
+  const goal = Math.max(60, state.settings.dailyGoalMinutes * 60);
+  const cells = [];
+  const monthRows = [];
+
+  for (let index = 0; index < leading; index += 1) {
+    const empty = document.createElement('div');
+    empty.className = 'calendar-day empty';
+    cells.push(empty);
+  }
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = new Date(year, month, day);
+    const key = dateKey(date);
+    const entry = data[key] ?? { focusSeconds: 0, distractionSeconds: 0, sessions: 0 };
+    if (entry.focusSeconds > 0) monthRows.push({ day, ...entry });
+    const cell = document.createElement('div');
+    cell.className = `calendar-day${key === dateKey(new Date()) ? ' today' : ''}`;
+    cell.style.setProperty('--heat', Math.min(1, entry.focusSeconds / goal));
+    cell.title = `${key} · 집중 ${Math.round(entry.focusSeconds / 60)}분 · ${entry.sessions}세션`;
+    const number = document.createElement('b');
+    number.textContent = String(day);
+    const minutes = document.createElement('strong');
+    minutes.textContent = entry.focusSeconds > 0 ? `${Math.round(entry.focusSeconds / 60)}분` : '·';
+    const sessions = document.createElement('small');
+    sessions.textContent = entry.sessions > 0 ? `${entry.sessions} sessions` : '';
+    cell.append(number, minutes, sessions);
+    cells.push(cell);
+  }
+  $('#focus-calendar').replaceChildren(...cells);
+  $('#calendar-month').textContent = `${year}. ${String(month + 1).padStart(2, '0')}`;
+  const total = monthRows.reduce((sum, row) => sum + row.focusSeconds, 0);
+  const best = monthRows.toSorted((a, b) => b.focusSeconds - a.focusSeconds)[0];
+  $('#month-total').textContent = `${Math.round(total / 60)}분`;
+  $('#month-best').textContent = best ? `${best.day}일 · ${Math.round(best.focusSeconds / 60)}분` : '-';
+  $('#month-days').textContent = `${monthRows.length}일`;
+}
+
+async function refreshContext() {
+  context = await window.nfc.listContext();
+  const windowSelect = $('#target-window');
+  const displaySelect = $('#target-display');
+  const oldWindow = windowSelect.value;
+  const oldDisplay = displaySelect.value;
+
+  windowSelect.replaceChildren(new Option('창을 선택하세요', ''), ...context.windows.map(item => new Option(`${item.owner?.name ?? '앱'} — ${item.title}`, item.id)));
+  displaySelect.replaceChildren(new Option('모니터를 선택하세요', ''), ...context.displays.map(item => new Option(`${item.label}${item.primary ? ' · 주 모니터' : ''} · ${item.bounds.width}×${item.bounds.height}`, item.id)));
+  if (context.windows.some(item => item.id === oldWindow)) windowSelect.value = oldWindow;
+  else if (context.windows[0]) windowSelect.value = context.windows[0].id;
+  if (context.displays.some(item => item.id === oldDisplay)) displaySelect.value = oldDisplay;
+  else if (context.displays[0]) displaySelect.value = context.displays.find(item => item.primary)?.id ?? context.displays[0].id;
+}
+
+async function startOrToggle() {
+  if (state.runtime.currentSession) {
+    await window.nfc.togglePause();
+    return;
+  }
+  const targetWindow = context.windows.find(item => item.id === $('#target-window').value);
+  const targetDisplayId = $('#target-display').value || null;
+  if (selectedMode === 'focus' && state.settings.windowLockEnabled && !targetWindow && !state.capabilities.waylandLimited) {
+    await refreshContext();
+    return;
+  }
+  await window.nfc.startSession({
+    mode: selectedMode,
+    participantName: $('#participant-name').value,
+    targetWindow,
+    targetDisplayId
+  });
+}
+
+function bindDashboard() {
+  $('#show-overlay').addEventListener('click', window.nfc.showOverlay);
+  $('#timer-overlay-action').addEventListener('click', window.nfc.showOverlay);
+  $('#minimize-window').addEventListener('click', window.nfc.minimize);
+  $('#close-window').addEventListener('click', window.nfc.close);
+  $('#primary-action').addEventListener('click', startOrToggle);
+  $('#stop-action').addEventListener('click', window.nfc.stopSession);
+  $('#refresh-context').addEventListener('click', refreshContext);
+
+  $$('.mode-switch button').forEach(button => button.addEventListener('click', () => {
+    if (state.runtime.currentSession) return;
+    selectedMode = button.dataset.mode;
+    $$('.mode-switch button').forEach(item => item.classList.toggle('active', item === button));
+    state.runtime.remainingSeconds = selectedMode === 'focus'
+      ? state.settings.focusMinutes * 60
+      : state.settings.breakMinutes * 60;
+    renderDashboard();
+  }));
+
+  $$('.tabs button').forEach(button => button.addEventListener('click', () => {
+    $$('.tabs button').forEach(item => item.classList.toggle('active', item === button));
+    $$('.tab-panel').forEach(panel => panel.classList.toggle('active', panel.dataset.panel === button.dataset.tab));
+  }));
+
+  $('#calendar-prev').addEventListener('click', () => {
+    calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() - 1, 1);
+    renderCalendar();
+  });
+  $('#calendar-next').addEventListener('click', () => {
+    calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() + 1, 1);
+    renderCalendar();
+  });
+
+  const settingMap = {
+    '#participant-name': ['participantName', String],
+    '#focus-minutes': ['focusMinutes', Number],
+    '#break-minutes': ['breakMinutes', Number],
+    '#long-break-minutes': ['longBreakMinutes', Number],
+    '#long-break-cycle': ['cyclesBeforeLongBreak', Number],
+    '#daily-goal-minutes': ['dailyGoalMinutes', Number],
+    '#idle-threshold': ['idleThresholdSeconds', Number],
+    '#window-lock': ['windowLockEnabled', element => element.checked],
+    '#monitor-lock': ['monitorLockEnabled', element => element.checked],
+    '#tab-lock': ['tabLockEnabled', element => element.checked],
+    '#screen-inactive': ['pauseWhenScreenInactive', element => element.checked],
+    '#record-urls': ['recordUrls', element => element.checked],
+    '#alarm-enabled': ['alarmEnabled', element => element.checked],
+    '#auto-overlay': ['autoOpenOverlay', element => element.checked]
+  };
+  for (const [selector, [key, transform]] of Object.entries(settingMap)) {
+    const element = $(selector);
+    element.addEventListener('change', () => window.nfc.updateSettings({ [key]: transform === String || transform === Number ? transform(element.value) : transform(element) }));
+  }
+
+  const themeMap = {
+    '#timer-color': ['timerColor', String],
+    '#accent-color': ['accentColor', String],
+    '#panel-color': ['panelColor', String],
+    '#panel-opacity': ['panelOpacity', Number],
+    '#overlay-opacity': ['overlayOpacity', Number],
+    '#theme-blur': ['blur', Number],
+    '#timer-size': ['timerSize', Number],
+    '#shadow-strength': ['shadowStrength', Number]
+  };
+  for (const [selector, [key, transform]] of Object.entries(themeMap)) {
+    const element = $(selector);
+    element.addEventListener('input', () => {
+      const value = transform(element.value);
+      state.settings.theme[key] = value;
+      applyTheme(state.settings.theme);
+      if (element.type === 'range') renderDashboard();
+    });
+    element.addEventListener('change', () => window.nfc.updateSettings({ theme: { [key]: transform(element.value) } }));
+  }
+
+  const presets = {
+    lime: { timerColor: '#D7FF5F', accentColor: '#A7FF3F' },
+    white: { timerColor: '#FFFFFF', accentColor: '#D7DEEA' },
+    cyan: { timerColor: '#7EF9FF', accentColor: '#36DDEA' },
+    amber: { timerColor: '#FFD166', accentColor: '#FFB52E' },
+    pink: { timerColor: '#FF92D0', accentColor: '#FF58B0' }
+  };
+  $$('.preset-row button').forEach(button => button.addEventListener('click', () => window.nfc.updateSettings({ theme: presets[button.dataset.preset] })));
+
+  $('#save-sync').addEventListener('click', async () => {
+    await window.nfc.configureSync({
+      endpoint: $('#sync-endpoint').value.trim(),
+      accountId: $('#sync-account').value.trim(),
+      token: $('#sync-token').value,
+      enabled: true
+    });
+    $('#sync-token').value = '';
+    $('#sync-status').textContent = '연동 설정을 안전 저장소에 저장했습니다.';
+  });
+  $('#sync-push').addEventListener('click', () => runSync('push'));
+  $('#sync-pull').addEventListener('click', () => runSync('pull'));
+  $('#export-data').addEventListener('click', window.nfc.exportData);
+  $('#import-data').addEventListener('click', window.nfc.importData);
+  $('#clear-history').addEventListener('click', async () => {
+    if (confirm('모든 로컬 기록을 삭제할까요?')) await window.nfc.clearHistory();
+  });
+}
+
+async function runSync(direction) {
+  const status = $('#sync-status');
+  status.textContent = '동기화 중…';
+  try {
+    await window.nfc.runSync(direction);
+    status.textContent = direction === 'push' ? '서버 업로드 완료' : '서버 기록 병합 완료';
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+function bindOverlay() {
+  const surface = $('.overlay-surface');
+  surface.addEventListener('mouseenter', () => window.nfc.setOverlayInteractive(true));
+  surface.addEventListener('mouseleave', () => window.nfc.setOverlayInteractive(false));
+  $('#overlay-pause').addEventListener('click', window.nfc.togglePause);
+  $('#overlay-stop').addEventListener('click', window.nfc.stopSession);
+  $('#overlay-close').addEventListener('click', window.nfc.hideOverlay);
+  window.nfc.onOverlayUnlock(unlocked => document.body.classList.toggle('overlay-unlocked', unlocked));
+}
+
+async function init() {
+  state = await window.nfc.getState();
+  if (isOverlay) {
+    $('#overlay-view').hidden = false;
+    bindOverlay();
+    renderOverlay();
+  } else {
+    $('#dashboard').hidden = false;
+    bindDashboard();
+    await refreshContext();
+    renderDashboard();
+  }
+  window.nfc.onState(next => {
+    state = next;
+    isOverlay ? renderOverlay() : renderDashboard();
+  });
+}
+
+void init();

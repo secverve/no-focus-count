@@ -1,0 +1,66 @@
+name: Desktop Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            command: npm run dist:mac -- --publish never
+            artifact: macOS
+          - os: windows-latest
+            command: npm run dist:win -- --publish never
+            artifact: Windows
+          - os: ubuntu-24.04
+            command: npm run dist:linux -- --publish never
+            artifact: Linux
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: cross-platform
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: cross-platform/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - name: Build ${{ matrix.artifact }} packages
+        run: ${{ matrix.command }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: No-Focus-Count-${{ matrix.artifact }}
+          path: |
+            cross-platform/release/*.dmg
+            cross-platform/release/*.zip
+            cross-platform/release/*.exe
+            cross-platform/release/*.AppImage
+            cross-platform/release/*.deb
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: artifacts
+      - name: Publish GitHub release
+        run: gh release create "$GITHUB_REF_NAME" artifacts/**/* --generate-notes --title "No Focus Count $GITHUB_REF_NAME"
+        env:
+          GH_TOKEN: ${{ github.token }}

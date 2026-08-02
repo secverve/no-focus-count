@@ -341,7 +341,7 @@ private struct SessionSettingsView: View {
         ZStack {
             Color(red: 0.035, green: 0.038, blue: 0.043).ignoresSafeArea()
 
-            VStack(spacing: 20) {
+            VStack(spacing: 0) {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("SESSION SETUP")
@@ -354,107 +354,115 @@ private struct SessionSettingsView: View {
                     Button("DONE") { dismiss() }
                         .buttonStyle(NFCPillButtonStyle(primary: true))
                 }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 18)
+                .background(Color(red: 0.035, green: 0.038, blue: 0.043).opacity(0.96))
 
-                NFCSettingRow(title: "이름", subtitle: "이 Mac의 로컬 랭킹에 표시됩니다") {
-                    TextField("나", text: $model.participantName)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 240)
-                }
+                ScrollView {
+                    VStack(spacing: 14) {
+                        NFCSettingRow(title: "이름", subtitle: "이 Mac의 로컬 랭킹에 표시됩니다") {
+                            TextField("나", text: $model.participantName)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(maxWidth: 240)
+                        }
 
-                NFCSettingRow(title: "집중할 창", subtitle: "제목이 숨겨진 창도 번호로 표시합니다") {
-                    HStack {
-                        Picker("", selection: $model.selectedWindowID) {
-                            Text("창 선택").tag(Optional<UInt32>.none)
-                            ForEach(model.windows) { window in
-                                Text(window.displayName).tag(Optional(window.id))
+                        NFCSettingRow(title: "집중할 창", subtitle: "제목이 숨겨진 창도 번호로 표시합니다") {
+                            HStack {
+                                Picker("", selection: $model.selectedWindowID) {
+                                    Text("창 선택").tag(Optional<UInt32>.none)
+                                    ForEach(model.windows) { window in
+                                        Text(window.displayName).tag(Optional(window.id))
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(maxWidth: 300)
+
+                                Button {
+                                    model.refreshWindows()
+                                } label: {
+                                    Image(systemName: "arrow.clockwise")
+                                }
+                                .buttonStyle(.borderless)
                             }
                         }
-                        .labelsHidden()
-                        .frame(width: 300)
 
-                        Button {
-                            model.refreshWindows()
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
+                        NFCSettingRow(title: "집중 시간", subtitle: "5분부터 120분까지") {
+                            Stepper("\(model.focusMinutes)분", value: $model.focusMinutes, in: 5...120, step: 5)
+                                .frame(maxWidth: 160)
                         }
-                        .buttonStyle(.borderless)
-                    }
-                }
 
-                NFCSettingRow(title: "집중 시간", subtitle: "5분부터 120분까지") {
-                    Stepper("\(model.focusMinutes)분", value: $model.focusMinutes, in: 5...120, step: 5)
-                        .frame(width: 160)
-                }
-
-                VStack(alignment: .leading, spacing: 9) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("최소 창 노출")
-                                .font(.callout.weight(.semibold))
-                            Text("\(Int(model.minimumVisiblePercent))% 이상 보여야 집중으로 인정")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 9) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("최소 창 노출")
+                                        .font(.callout.weight(.semibold))
+                                    Text("\(Int(model.minimumVisiblePercent))% 이상 보여야 집중으로 인정")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                            }
+                            Slider(value: $model.minimumVisiblePercent, in: 30...100, step: 5)
+                                .tint(.nfcLime)
                         }
-                        Spacer()
-                    }
-                    Slider(value: $model.minimumVisiblePercent, in: 30...100, step: 5)
-                        .tint(.nfcLime)
-                }
-                .padding(16)
-                .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 14))
+                        .padding(16)
+                        .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 14))
 
-                NFCSettingRow(title: "브라우저 URL 기록", subtitle: "선택 동의 · 페이지 내용과 입력값은 수집하지 않음") {
-                    Toggle("", isOn: $model.recordBrowserURLs)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .tint(.nfcLime)
-                }
+                        NFCSettingRow(title: "브라우저 URL 기록", subtitle: "선택 동의 · 페이지 내용과 입력값은 수집하지 않음") {
+                            Toggle("", isOn: $model.recordBrowserURLs)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .tint(.nfcLime)
+                        }
 
-                NFCSettingRow(title: "Focus Receipt", subtitle: "2초 이상 이탈할 때 해당 창의 저해상도 사진 1장만 로컬 저장") {
-                    Toggle("", isOn: $model.captureFocusReceipts)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .tint(.nfcLime)
-                        .onChange(of: model.captureFocusReceipts) { _, enabled in
-                            if enabled && !model.screenCaptureTrusted {
-                                model.requestScreenCapturePermission()
+                        NFCSettingRow(title: "Focus Receipt", subtitle: "2초 이상 이탈할 때 해당 창의 저해상도 사진 1장만 로컬 저장") {
+                            Toggle("", isOn: $model.captureFocusReceipts)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .tint(.nfcLime)
+                                .onChange(of: model.captureFocusReceipts) { _, enabled in
+                                    if enabled && !model.screenCaptureTrusted {
+                                        model.requestScreenCapturePermission()
+                                    }
+                                }
+                        }
+
+                        NFCSettingRow(title: "완료 알람", subtitle: "소리, macOS 알림, Dock 표시로 타이머 완료 안내") {
+                            Toggle("", isOn: $model.alarmEnabled)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .tint(.nfcLime)
+                                .onChange(of: model.alarmEnabled) { _, enabled in
+                                    if enabled { model.requestAlarmPermission() }
+                                }
+                        }
+
+                        if model.captureFocusReceipts && !model.screenCaptureTrusted {
+                            HStack {
+                                Text("화면 기록 권한을 허용한 뒤 앱을 다시 실행하면 Focus Receipt가 활성화됩니다.")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                Spacer()
+                                Button("화면 기록 설정") { model.requestScreenCapturePermission() }
+                                    .buttonStyle(NFCPillButtonStyle())
                             }
                         }
-                }
 
-                NFCSettingRow(title: "완료 알람", subtitle: "소리, macOS 알림, Dock 표시로 타이머 완료 안내") {
-                    Toggle("", isOn: $model.alarmEnabled)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .tint(.nfcLime)
-                        .onChange(of: model.alarmEnabled) { _, enabled in
-                            if enabled { model.requestAlarmPermission() }
+                        if !model.accessibilityTrusted {
+                            Button("손쉬운 사용 설정 열기") { model.requestAccessibilityPermission() }
+                                .buttonStyle(NFCPillButtonStyle())
                         }
-                }
 
-                if model.captureFocusReceipts && !model.screenCaptureTrusted {
-                    HStack {
-                        Text("화면 기록 권한을 허용한 뒤 앱을 다시 실행하면 Focus Receipt가 활성화됩니다.")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                        Spacer()
-                        Button("화면 기록 설정") { model.requestScreenCapturePermission() }
-                            .buttonStyle(NFCPillButtonStyle())
+                        Text("모든 기록은 이 Mac에만 저장됩니다. 키 입력, 화면 이미지, SNS 본문은 읽지 않습니다.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
                     }
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 24)
                 }
-
-                if !model.accessibilityTrusted {
-                    Button("손쉬운 사용 설정 열기") { model.requestAccessibilityPermission() }
-                        .buttonStyle(NFCPillButtonStyle())
-                }
-
-                Text("모든 기록은 이 Mac에만 저장됩니다. 키 입력, 화면 이미지, SNS 본문은 읽지 않습니다.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
             }
-            .padding(26)
         }
-        .frame(width: 620, height: 570)
+        .frame(minWidth: 500, idealWidth: 620, maxWidth: 720, minHeight: 420, idealHeight: 570, maxHeight: 680)
         .preferredColorScheme(.dark)
         .onAppear { model.refreshWindows() }
     }

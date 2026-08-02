@@ -1,5 +1,8 @@
 .DS_Store
 .build/
 dist/
+cross-platform/node_modules/
+cross-platform/release/
+cross-platform/sync-server/data/
 DerivedData/
 *.xcuserstate

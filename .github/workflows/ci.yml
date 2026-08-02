@@ -13,3 +13,19 @@ jobs:
         run: swift test
       - name: Build app bundle
         run: sh Scripts/build-app.sh
+
+  cross-platform-core:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: cross-platform
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: cross-platform/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm audit --audit-level=high

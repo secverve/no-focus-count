@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https: http://127.0.0.1:* http://localhost:*">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>No Focus Count</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <section id="overlay-view" class="overlay-view" hidden>
+      <div class="overlay-surface">
+        <div class="overlay-mode" id="overlay-mode">FOCUS</div>
+        <div class="overlay-time" id="overlay-time">25:00</div>
+        <div class="overlay-status" id="overlay-status"><i></i><span>READY</span></div>
+        <div class="overlay-controls no-drag">
+          <button id="overlay-pause" aria-label="일시정지">Ⅱ</button>
+          <button id="overlay-stop" aria-label="종료">■</button>
+          <button id="overlay-close" aria-label="오버레이 닫기">×</button>
+        </div>
+        <div class="overlay-unlock">⌘/Ctrl + Shift + F</div>
+      </div>
+    </section>
+
+    <main id="dashboard" class="dashboard" hidden>
+      <header class="titlebar">
+        <div class="brand"><i></i><span>NO FOCUS COUNT</span><small>CROSS PLATFORM</small></div>
+        <div class="window-actions no-drag">
+          <button id="show-overlay" title="숫자 오버레이 열기">◫</button>
+          <button id="minimize-window" title="최소화">−</button>
+          <button id="close-window" title="닫기">×</button>
+        </div>
+      </header>
+
+      <div class="content">
+        <section class="timer-zone">
+          <div class="timer-aura"></div>
+          <div class="mode-switch no-drag">
+            <button data-mode="focus" class="active">집중</button>
+            <button data-mode="break">휴식</button>
+          </div>
+          <div class="timer-number" id="timer-number">25:00</div>
+          <div class="phase-line" id="phase-line"><i></i><span>READY</span></div>
+          <div class="timer-hover-actions no-drag">
+            <button id="primary-action" class="primary">START</button>
+            <button id="stop-action">STOP</button>
+            <button id="timer-overlay-action">FLOAT</button>
+          </div>
+        </section>
+
+        <section class="goal-line">
+          <div><strong id="today-focus">0분</strong><span>오늘 집중</span></div>
+          <div class="goal-track"><i id="goal-progress"></i></div>
+          <div class="goal-copy"><span>일일 목표</span><strong id="daily-goal">120분</strong></div>
+        </section>
+
+        <section class="context-strip no-drag">
+          <label>
+            <span>집중 창</span>
+            <select id="target-window"><option value="">창을 불러오는 중…</option></select>
+          </label>
+          <label>
+            <span>집중 모니터</span>
+            <select id="target-display"><option value="">모니터를 불러오는 중…</option></select>
+          </label>
+          <button id="refresh-context" title="창과 모니터 새로고침">↻</button>
+        </section>
+
+        <div id="wayland-warning" class="warning" hidden>
+          Wayland에서는 다른 앱의 활성 창을 읽을 수 없어 모니터 이탈을 커서 위치로 판정합니다. X11에서는 창과 모니터를 모두 감지합니다.
+        </div>
+
+        <section class="metric-grid">
+          <article><span>FOCUSED</span><strong id="metric-focused">00:00</strong></article>
+          <article><span>DISTRACTIONS</span><strong id="metric-distractions">0</strong></article>
+          <article><span>LOST</span><strong id="metric-lost">00:00</strong></article>
+          <article><span>CYCLES</span><strong id="metric-cycles">0</strong></article>
+        </section>
+
+        <nav class="tabs no-drag">
+          <button data-tab="setup" class="active">시간과 감지</button>
+          <button data-tab="theme">투명 테마</button>
+          <button data-tab="calendar">집중 달력</button>
+          <button data-tab="sync">기기 연동</button>
+          <button data-tab="history">기록</button>
+        </nav>
+
+        <section class="tab-panel active" data-panel="setup">
+          <div class="settings-grid">
+            <label class="field"><span>이름</span><input id="participant-name" type="text" maxlength="60"></label>
+            <label class="field"><span>집중 시간</span><input id="focus-minutes" type="number" min="1" max="180"><em>분</em></label>
+            <label class="field"><span>짧은 휴식</span><input id="break-minutes" type="number" min="1" max="60"><em>분</em></label>
+            <label class="field"><span>긴 휴식</span><input id="long-break-minutes" type="number" min="1" max="120"><em>분</em></label>
+            <label class="field"><span>긴 휴식 주기</span><input id="long-break-cycle" type="number" min="1" max="12"><em>회</em></label>
+            <label class="field"><span>일일 목표</span><input id="daily-goal-minutes" type="number" min="1" max="1440"><em>분</em></label>
+            <label class="field"><span>유휴 정지 기준</span><input id="idle-threshold" type="number" min="30" max="3600"><em>초</em></label>
+          </div>
+          <div class="toggle-grid">
+            <label><input id="window-lock" type="checkbox"><span>선택 창을 벗어나면 정지</span></label>
+            <label><input id="monitor-lock" type="checkbox"><span>선택 모니터를 벗어나면 정지</span></label>
+            <label><input id="tab-lock" type="checkbox"><span>브라우저 탭이 바뀌면 정지</span></label>
+            <label><input id="screen-inactive" type="checkbox"><span>화면 잠금·절전·유휴 시 정지</span></label>
+            <label><input id="record-urls" type="checkbox"><span>브라우저 URL 기록</span></label>
+            <label><input id="alarm-enabled" type="checkbox"><span>완료 알람</span></label>
+            <label><input id="auto-overlay" type="checkbox"><span>시작할 때 오버레이 열기</span></label>
+          </div>
+        </section>
+
+        <section class="tab-panel" data-panel="theme">
+          <div class="theme-preview" id="theme-preview"><span>12:34</span></div>
+          <div class="settings-grid theme-grid">
+            <label class="field color-field"><span>숫자 색</span><input id="timer-color" type="color"></label>
+            <label class="field color-field"><span>포인트 색</span><input id="accent-color" type="color"></label>
+            <label class="field color-field"><span>패널 색</span><input id="panel-color" type="color"></label>
+            <label class="field range-field"><span>대시보드 투명도</span><input id="panel-opacity" type="range" min="0" max="0.7" step="0.01"><output></output></label>
+            <label class="field range-field"><span>오버레이 투명도</span><input id="overlay-opacity" type="range" min="0" max="0.6" step="0.01"><output></output></label>
+            <label class="field range-field"><span>배경 블러</span><input id="theme-blur" type="range" min="0" max="40" step="1"><output></output></label>
+            <label class="field range-field"><span>숫자 크기</span><input id="timer-size" type="range" min="72" max="148" step="2"><output></output></label>
+            <label class="field range-field"><span>글로우 강도</span><input id="shadow-strength" type="range" min="0" max="1.5" step="0.05"><output></output></label>
+          </div>
+          <div class="preset-row no-drag">
+            <button data-preset="lime">LIME</button><button data-preset="white">WHITE</button><button data-preset="cyan">CYAN</button><button data-preset="amber">AMBER</button><button data-preset="pink">PINK</button>
+          </div>
+        </section>
+
+        <section class="tab-panel" data-panel="calendar">
+          <div class="calendar-head no-drag">
+            <button id="calendar-prev" aria-label="이전 달">‹</button>
+            <strong id="calendar-month"></strong>
+            <button id="calendar-next" aria-label="다음 달">›</button>
+          </div>
+          <div class="calendar-summary">
+            <div><span>MONTH TOTAL</span><strong id="month-total">0분</strong></div>
+            <div><span>BEST DAY</span><strong id="month-best">-</strong></div>
+            <div><span>ACTIVE DAYS</span><strong id="month-days">0일</strong></div>
+          </div>
+          <div class="calendar-weekdays"><span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div>
+          <div id="focus-calendar" class="focus-calendar"></div>
+        </section>
+
+        <section class="tab-panel" data-panel="sync">
+          <div class="sync-intro">
+            <strong>Local-first Sync</strong>
+            <p>기록은 항상 이 컴퓨터에 먼저 저장됩니다. 자체 동기화 서버를 연결하면 같은 계정 ID의 기록을 병합할 수 있습니다.</p>
+          </div>
+          <div class="settings-grid">
+            <label class="field wide"><span>동기화 서버 주소</span><input id="sync-endpoint" type="url" placeholder="https://sync.example.com"></label>
+            <label class="field"><span>계정 ID</span><input id="sync-account" type="text" placeholder="my-account"></label>
+            <label class="field"><span>접근 토큰</span><input id="sync-token" type="password" placeholder="저장된 경우 비워두세요"></label>
+          </div>
+          <div class="sync-actions no-drag">
+            <button id="save-sync">연동 설정 저장</button>
+            <button id="sync-push">이 기기 → 서버</button>
+            <button id="sync-pull">서버 → 이 기기</button>
+            <button id="export-data">JSON 내보내기</button>
+            <button id="import-data">JSON 가져오기</button>
+          </div>
+          <p id="sync-status" class="sync-status"></p>
+        </section>
+
+        <section class="tab-panel" data-panel="history">
+          <div class="leaderboard-grid">
+            <article class="leaderboard-card best"><span>집중왕</span><strong id="best-name">-</strong><em id="best-score">기록 없음</em></article>
+            <article class="leaderboard-card worst"><span>딴짓왕</span><strong id="worst-name">-</strong><em id="worst-score">기록 없음</em></article>
+          </div>
+          <p id="focus-nudge" class="focus-nudge">첫 집중 세션을 시작해 보세요.</p>
+          <div class="history-head"><span id="history-count">0 sessions</span><button id="clear-history" class="danger no-drag">모두 삭제</button></div>
+          <div id="history-list" class="history-list"></div>
+        </section>
+      </div>
+    </main>
+    <script type="module" src="renderer.js"></script>
+  </body>
+</html>

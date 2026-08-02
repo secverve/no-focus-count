@@ -4,7 +4,12 @@
   "description": "Transparent, privacy-first focus timer for macOS, Windows, and Linux",
   "type": "module",
   "main": "main.mjs",
-  "author": "secverve",
+  "author": {
+    "name": "secverve",
+    "email": "secverve@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/secverve/no-focus-count",
+  "desktopName": "no-focus-count.desktop",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
@@ -58,7 +63,8 @@
     "linux": {
       "target": ["AppImage", "deb"],
       "category": "Utility",
-      "synopsis": "Transparent focus timer and distraction tracker"
+      "synopsis": "Transparent focus timer and distraction tracker",
+      "syncDesktopName": true
     },
     "publish": {
       "provider": "github",

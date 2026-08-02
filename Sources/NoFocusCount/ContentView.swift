@@ -338,7 +338,7 @@ private struct SessionSettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .topTrailing) {
             Color(red: 0.035, green: 0.038, blue: 0.043).ignoresSafeArea()
 
             VStack(spacing: 0) {
@@ -354,7 +354,8 @@ private struct SessionSettingsView: View {
                     Button("DONE") { dismiss() }
                         .buttonStyle(NFCPillButtonStyle(primary: true))
                 }
-                .padding(.horizontal, 24)
+                .padding(.leading, 24)
+                .padding(.trailing, 68)
                 .padding(.vertical, 18)
                 .background(Color(red: 0.035, green: 0.038, blue: 0.043).opacity(0.96))
 
@@ -461,8 +462,23 @@ private struct SessionSettingsView: View {
                     .padding(.bottom, 24)
                 }
             }
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .bold))
+                    .frame(width: 32, height: 32)
+                    .background(Color.white.opacity(0.09), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+            .help("설정 닫기 (Esc)")
+            .accessibilityLabel("설정 닫기")
+            .padding(14)
+            .zIndex(10)
         }
-        .frame(minWidth: 500, idealWidth: 620, maxWidth: 720, minHeight: 420, idealHeight: 570, maxHeight: 680)
+        .frame(minWidth: 420, idealWidth: 620, maxWidth: 720, minHeight: 360, idealHeight: 570, maxHeight: 680)
         .preferredColorScheme(.dark)
         .onAppear { model.refreshWindows() }
     }

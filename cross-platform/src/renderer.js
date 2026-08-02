@@ -7,6 +7,20 @@ let context = { windows: [], displays: [] };
 let selectedMode = 'focus';
 let calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
+const reasonLabels = {
+  ready: '준비',
+  checking: '창 확인 중',
+  focused: '집중 측정 중',
+  'app-control': '앱 설정 조작 중',
+  'left-monitor': '선택 모니터 이탈',
+  'different-window': '다른 창 사용',
+  'different-tab': '브라우저 탭 변경',
+  'screen-inactive': '화면 잠금·절전·유휴',
+  'window-unavailable': '집중 창 닫힘/숨김',
+  break: '휴식 측정 중',
+  completed: '완료'
+};
+
 const formatTime = value => {
   const seconds = Math.max(0, Math.round(Number(value) || 0));
   return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
@@ -28,6 +42,7 @@ function applyTheme(theme) {
   root.style.setProperty('--panel', theme.panelColor);
   root.style.setProperty('--panel-opacity', theme.panelOpacity);
   root.style.setProperty('--overlay-opacity', theme.overlayOpacity);
+  root.style.setProperty('--overlay-glass', `${Math.round(Math.min(0.62, Math.max(0.14, Number(theme.overlayOpacity) + 0.18)) * 100)}%`);
   root.style.setProperty('--blur', `${theme.blur}px`);
   root.style.setProperty('--timer-size', `${theme.timerSize}px`);
   root.style.setProperty('--overlay-timer-size', `${theme.overlayTimerSize}px`);
@@ -73,6 +88,7 @@ function renderDashboard() {
   $('#metric-lost').textContent = formatTime(session?.distractionSeconds ?? 0);
   $('#metric-cycles').textContent = String(runtime.completedCycles);
   $('#wayland-warning').hidden = !state.capabilities.waylandLimited;
+  renderFocusInspector();
 
   const settings = state.settings;
   setValue('#participant-name', settings.participantName);
@@ -161,13 +177,6 @@ function renderHistory() {
     item.append(summary);
     const events = document.createElement('div');
     events.className = 'event-list';
-    const reasonLabels = {
-      'left-monitor': '모니터 이탈',
-      'different-window': '다른 창',
-      'different-tab': '탭 변경',
-      'screen-inactive': '잠금·절전·유휴',
-      'window-unavailable': '집중 창 닫힘'
-    };
     if (!session.events?.length) {
       const empty = document.createElement('p');
       empty.textContent = '이탈 기록 없음';
@@ -191,6 +200,45 @@ function renderHistory() {
     item.append(events);
     return item;
   }));
+}
+
+function displayForWindow(windowInfo) {
+  if (!windowInfo?.bounds) return undefined;
+  const centerX = windowInfo.bounds.x + windowInfo.bounds.width / 2;
+  const centerY = windowInfo.bounds.y + windowInfo.bounds.height / 2;
+  return context.displays.find(display => (
+    centerX >= display.bounds.x && centerX < display.bounds.x + display.bounds.width &&
+    centerY >= display.bounds.y && centerY < display.bounds.y + display.bounds.height
+  ));
+}
+
+function windowIdentity(windowInfo) {
+  if (!windowInfo) return '선택 없음';
+  return `${windowInfo.owner?.name ?? '앱'} · 창 #${windowInfo.id}`;
+}
+
+function windowDetail(windowInfo, displayId) {
+  if (!windowInfo) return '창을 선택하면 상세 정보가 표시됩니다';
+  const display = displayForWindow(windowInfo) ?? context.displays.find(item => String(item.id) === String(displayId));
+  return `${windowInfo.title || '제목 없음'} · ${display?.label ?? `모니터 ${displayId || '?'}`}`;
+}
+
+function renderFocusInspector() {
+  const runtime = state.runtime;
+  const selectedId = $('#target-window')?.value;
+  const target = runtime.currentSession?.targetWindow ?? context.windows.find(item => item.id === selectedId);
+  const targetDisplayId = runtime.currentSession?.targetDisplayId ?? $('#target-display')?.value;
+  const active = runtime.lastContext?.activeWindow;
+  const activeDisplayId = runtime.lastContext?.activeDisplayId;
+  const reason = runtime.lastFocusReason ?? 'ready';
+
+  $('#inspector-target').textContent = windowIdentity(target);
+  $('#inspector-target-detail').textContent = windowDetail(target, targetDisplayId);
+  $('#inspector-active').textContent = active ? windowIdentity(active) : '측정 대기';
+  $('#inspector-active-detail').textContent = active ? windowDetail(active, activeDisplayId) : '세션 중 1초마다 갱신됩니다';
+  $('#inspector-verdict').textContent = reasonLabels[reason] ?? reason;
+  $('#inspector-verdict-detail').textContent = `창 #${target?.id ?? '?'} · 모니터 ${targetDisplayId || '?'} 기준`;
+  $('.focus-inspector article:last-child').classList.toggle('warn', !['ready', 'checking', 'focused', 'app-control', 'break', 'completed'].includes(reason));
 }
 
 function dateKey(date) {
@@ -259,12 +307,16 @@ async function refreshContext() {
   const oldWindow = windowSelect.value;
   const oldDisplay = displaySelect.value;
 
-  windowSelect.replaceChildren(new Option('창을 선택하세요', ''), ...context.windows.map(item => new Option(`${item.owner?.name ?? '앱'} — ${item.title}`, item.id)));
+  windowSelect.replaceChildren(new Option('창을 선택하세요', ''), ...context.windows.map(item => {
+    const display = displayForWindow(item);
+    return new Option(`${item.owner?.name ?? '앱'} — ${item.title || '제목 없음'} · 창 #${item.id} · ${display?.label ?? '모니터 미확인'}`, item.id);
+  }));
   displaySelect.replaceChildren(new Option('모니터를 선택하세요', ''), ...context.displays.map(item => new Option(`${item.label}${item.primary ? ' · 주 모니터' : ''} · ${item.bounds.width}×${item.bounds.height}`, item.id)));
   if (context.windows.some(item => item.id === oldWindow)) windowSelect.value = oldWindow;
   else if (context.windows[0]) windowSelect.value = context.windows[0].id;
   if (context.displays.some(item => item.id === oldDisplay)) displaySelect.value = oldDisplay;
   else if (context.displays[0]) displaySelect.value = context.displays.find(item => item.primary)?.id ?? context.displays[0].id;
+  renderFocusInspector();
 }
 
 async function startOrToggle() {
@@ -294,6 +346,8 @@ function bindDashboard() {
   $('#primary-action').addEventListener('click', startOrToggle);
   $('#stop-action').addEventListener('click', window.nfc.stopSession);
   $('#refresh-context').addEventListener('click', refreshContext);
+  $('#target-window').addEventListener('change', renderFocusInspector);
+  $('#target-display').addEventListener('change', renderFocusInspector);
 
   $$('.mode-switch button').forEach(button => button.addEventListener('click', () => {
     if (state.runtime.currentSession) return;
@@ -401,11 +455,9 @@ async function runSync(direction) {
 }
 
 function bindOverlay() {
-  const surface = $('.overlay-surface');
-  surface.addEventListener('mouseenter', () => window.nfc.setOverlayInteractive(true));
-  surface.addEventListener('mouseleave', () => window.nfc.setOverlayInteractive(false));
   $('#overlay-pause').addEventListener('click', window.nfc.togglePause);
   $('#overlay-stop').addEventListener('click', window.nfc.stopSession);
+  $('#overlay-settings').addEventListener('click', window.nfc.showDashboard);
   $('#overlay-close').addEventListener('click', window.nfc.hideOverlay);
   window.nfc.onOverlayUnlock(unlocked => document.body.classList.toggle('overlay-unlocked', unlocked));
 }

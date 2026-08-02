@@ -12,6 +12,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var history: [FocusSession]
     @Published private(set) var accessibilityTrusted = false
     @Published private(set) var screenCaptureTrusted = false
+    @Published private(set) var latestSnapshot: ActivitySnapshot?
+    @Published private(set) var latestFocusStatus: FocusStatus?
 
     @Published var participantName: String {
         didSet { UserDefaults.standard.set(participantName, forKey: Keys.participantName) }
@@ -123,11 +125,15 @@ final class AppModel: ObservableObject {
     }
 
     func refreshWindows() {
+        let previousSelection = selectedWindowID
         windows = monitor.availableWindows()
-        if selectedWindow == nil {
+        if let previousSelection, windows.contains(where: { $0.id == previousSelection }) {
+            selectedWindowID = previousSelection
+        } else if selectedWindow == nil {
             selectedWindowID = windows.first?.id
         }
         accessibilityTrusted = monitor.isAccessibilityTrusted
+        refreshFocusDiagnostic()
     }
 
     func requestAccessibilityPermission() {
@@ -211,10 +217,12 @@ final class AppModel: ObservableObject {
     }
 
     private func startPolling() {
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.tick() }
         }
-        timer?.tolerance = 0.15
+        timer.tolerance = 0.15
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     private func tick() {
@@ -223,6 +231,7 @@ final class AppModel: ObservableObject {
         screenCaptureTrusted = receiptCapture.hasPermission
 
         guard var session = currentSession else {
+            refreshFocusDiagnostic()
             lastTick = now
             return
         }
@@ -232,6 +241,15 @@ final class AppModel: ObservableObject {
             return
         }
 
+        let snapshot = monitor.snapshot(for: session.target)
+        let status = FocusPolicy.evaluate(
+            snapshot: snapshot,
+            target: session.target,
+            minimumVisibleFraction: minimumVisiblePercent / 100
+        )
+        latestSnapshot = snapshot
+        latestFocusStatus = status
+
         if let graceUntil, now < graceUntil {
             lastTick = now
             return
@@ -240,13 +258,6 @@ final class AppModel: ObservableObject {
 
         let elapsed = min(2, max(0, now.timeIntervalSince(lastTick)))
         lastTick = now
-        let snapshot = monitor.snapshot(for: session.target)
-        let status = FocusPolicy.evaluate(
-            snapshot: snapshot,
-            target: session.target,
-            minimumVisibleFraction: minimumVisiblePercent / 100
-        )
-
         if status == .focused {
             closeCurrentDistraction(at: now)
             phase = .focusing
@@ -261,6 +272,21 @@ final class AppModel: ObservableObject {
             phase = .pausedByDistraction(status)
             recordDistraction(snapshot: snapshot, status: status)
         }
+    }
+
+    private func refreshFocusDiagnostic() {
+        guard let target = selectedWindow else {
+            latestSnapshot = nil
+            latestFocusStatus = nil
+            return
+        }
+        let snapshot = monitor.snapshot(for: target)
+        latestSnapshot = snapshot
+        latestFocusStatus = FocusPolicy.evaluate(
+            snapshot: snapshot,
+            target: target,
+            minimumVisibleFraction: minimumVisiblePercent / 100
+        )
     }
 
     private func recordDistraction(snapshot: ActivitySnapshot, status: FocusStatus) {

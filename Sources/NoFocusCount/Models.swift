@@ -6,11 +6,40 @@ struct TrackedWindow: Identifiable, Hashable, Codable {
     let appName: String
     let bundleIdentifier: String?
     let title: String
+    let monitorName: String?
+    let isOnScreen: Bool?
+
+    init(
+        id: UInt32,
+        ownerPID: Int32,
+        appName: String,
+        bundleIdentifier: String?,
+        title: String,
+        monitorName: String? = nil,
+        isOnScreen: Bool? = nil
+    ) {
+        self.id = id
+        self.ownerPID = ownerPID
+        self.appName = appName
+        self.bundleIdentifier = bundleIdentifier
+        self.title = title
+        self.monitorName = monitorName
+        self.isOnScreen = isOnScreen
+    }
 
     var displayName: String {
         title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "\(appName) — 제목 없는 창 #\(id)"
             : "\(appName) — \(title)"
+    }
+
+    var identityLabel: String {
+        let baseName = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "\(appName) — 제목 없음"
+            : displayName
+        let location = monitorName.map { " · \($0)" } ?? ""
+        let visibility = isOnScreen == false ? " · 다른 Space/최소화" : ""
+        return "\(baseName) · 창 #\(id)\(location)\(visibility)"
     }
 }
 
@@ -41,6 +70,29 @@ struct ActivitySnapshot: Equatable {
     let frontmostWindowTitle: String
     let targetIsOnScreen: Bool
     let targetVisibleFraction: Double
+    let frontmostMonitorName: String?
+
+    init(
+        capturedAt: Date,
+        frontmostPID: Int32?,
+        frontmostAppName: String,
+        frontmostBundleIdentifier: String?,
+        frontmostWindowID: UInt32?,
+        frontmostWindowTitle: String,
+        targetIsOnScreen: Bool,
+        targetVisibleFraction: Double,
+        frontmostMonitorName: String? = nil
+    ) {
+        self.capturedAt = capturedAt
+        self.frontmostPID = frontmostPID
+        self.frontmostAppName = frontmostAppName
+        self.frontmostBundleIdentifier = frontmostBundleIdentifier
+        self.frontmostWindowID = frontmostWindowID
+        self.frontmostWindowTitle = frontmostWindowTitle
+        self.targetIsOnScreen = targetIsOnScreen
+        self.targetVisibleFraction = targetVisibleFraction
+        self.frontmostMonitorName = frontmostMonitorName
+    }
 }
 
 enum FocusPolicy {

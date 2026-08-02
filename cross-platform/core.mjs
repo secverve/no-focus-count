@@ -13,6 +13,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   recordUrls: false,
   alarmEnabled: true,
   autoOpenOverlay: true,
+  overlayPosition: null,
   theme: {
     timerColor: '#D7FF5F',
     accentColor: '#A7FF3F',
@@ -48,6 +49,13 @@ export function mergeSettings(stored = {}) {
 export function formatTime(totalSeconds) {
   const seconds = Math.max(0, Math.round(Number(totalSeconds) || 0));
   return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+export function boundedElapsedSeconds(previousMilliseconds, currentMilliseconds, maximumSeconds = 2) {
+  const previous = Number(previousMilliseconds);
+  const current = Number(currentMilliseconds);
+  if (!Number.isFinite(previous) || !Number.isFinite(current)) return 0;
+  return Math.min(Math.max(0, Number(maximumSeconds) || 0), Math.max(0, (current - previous) / 1000));
 }
 
 export function displayForBounds(displays, bounds) {

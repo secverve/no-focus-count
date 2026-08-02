@@ -16,6 +16,7 @@ struct ContentView: View {
                     header
                     timerStage
                     sessionShortcut
+                    focusInspector
 
                     if !model.accessibilityTrusted {
                         permissionBanner
@@ -189,7 +190,7 @@ struct ContentView: View {
                 Text("/").foregroundStyle(.tertiary)
                 Image(systemName: "macwindow")
                     .foregroundStyle(.secondary)
-                Text(model.selectedWindow?.displayName ?? "집중할 창을 선택하세요")
+                Text(model.selectedWindow?.identityLabel ?? "집중할 창을 선택하세요")
                     .lineLimit(1)
                     .foregroundStyle(model.selectedWindow == nil ? Color.orange : Color.secondary)
                 Spacer()
@@ -214,6 +215,59 @@ struct ContentView: View {
             }
         }
         .buttonStyle(.plain)
+    }
+
+    private var focusInspector: some View {
+        let target = model.currentSession?.target ?? model.selectedWindow
+        let snapshot = model.latestSnapshot
+        let status = model.latestFocusStatus
+
+        return HStack(spacing: 10) {
+            contextCell(
+                eyebrow: "SELECTED WINDOW",
+                title: target.map { "\($0.appName) · #\($0.id)" } ?? "선택 없음",
+                detail: target.map { "\($0.title.isEmpty ? "제목 없음" : $0.title) · \($0.monitorName ?? "모니터 미확인")" } ?? "설정에서 창을 골라주세요",
+                tint: .nfcLime
+            )
+            contextCell(
+                eyebrow: "ACTIVE NOW",
+                title: snapshot.map { "\($0.frontmostAppName) · #\($0.frontmostWindowID.map(String.init) ?? "?")" } ?? "측정 대기",
+                detail: snapshot.map { "\($0.frontmostWindowTitle.isEmpty ? "제목 없음" : $0.frontmostWindowTitle) · \($0.frontmostMonitorName ?? "모니터 미확인")" } ?? "1초마다 갱신됩니다",
+                tint: .cyan
+            )
+            contextCell(
+                eyebrow: "TIMER VERDICT",
+                title: status?.label ?? "판정 대기",
+                detail: snapshot.map { "창 노출 \(Int(($0.targetVisibleFraction * 100).rounded()))% · \($0.capturedAt.formatted(date: .omitted, time: .standard))" } ?? "선택 창과 현재 창을 비교합니다",
+                tint: status == .focused ? .nfcLime : .orange
+            )
+        }
+    }
+
+    private func contextCell(eyebrow: String, title: String, detail: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Circle().fill(tint).frame(width: 6, height: 6)
+                Text(eyebrow)
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .tracking(0.8)
+                    .foregroundStyle(.secondary)
+            }
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.09), lineWidth: 0.7)
+        }
     }
 
     private var permissionBanner: some View {
@@ -372,7 +426,7 @@ private struct SessionSettingsView: View {
                                 Picker("", selection: $model.selectedWindowID) {
                                     Text("창 선택").tag(Optional<UInt32>.none)
                                     ForEach(model.windows) { window in
-                                        Text(window.displayName).tag(Optional(window.id))
+                                        Text(window.identityLabel).tag(Optional(window.id))
                                     }
                                 }
                                 .labelsHidden()

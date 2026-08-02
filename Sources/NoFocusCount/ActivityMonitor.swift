@@ -11,6 +11,8 @@ final class ActivityMonitor {
         let title: String
         let bounds: CGRect
         let alpha: Double
+        let isOnScreen: Bool
+        let monitorName: String?
     }
 
     var isAccessibilityTrusted: Bool {
@@ -23,10 +25,15 @@ final class ActivityMonitor {
     }
 
     func availableWindows() -> [TrackedWindow] {
-        windowRecords()
+        windowRecords(onScreenOnly: false)
             .filter { $0.ownerPID != ProcessInfo.processInfo.processIdentifier }
             .filter {
                 NSRunningApplication(processIdentifier: $0.ownerPID)?.activationPolicy == .regular
+            }
+            .sorted {
+                if $0.isOnScreen != $1.isOnScreen { return $0.isOnScreen && !$1.isOnScreen }
+                if $0.appName != $1.appName { return $0.appName.localizedStandardCompare($1.appName) == .orderedAscending }
+                return $0.id < $1.id
             }
             .map {
                 TrackedWindow(
@@ -34,16 +41,22 @@ final class ActivityMonitor {
                     ownerPID: $0.ownerPID,
                     appName: $0.appName,
                     bundleIdentifier: $0.bundleIdentifier,
-                    title: $0.title
+                    title: $0.title,
+                    monitorName: $0.monitorName,
+                    isOnScreen: $0.isOnScreen
                 )
             }
     }
 
     func snapshot(for target: TrackedWindow) -> ActivitySnapshot {
-        let windows = windowRecords()
+        let windows = windowRecords(onScreenOnly: true)
         let frontmostApplication = NSWorkspace.shared.frontmostApplication
         let frontmostPID = frontmostApplication?.processIdentifier
-        let frontmostWindow = windows.first { $0.ownerPID == frontmostPID }
+        let focusedTitle = focusedWindowTitle(pid: frontmostPID)
+        let frontmostWindows = windows.filter { $0.ownerPID == frontmostPID }
+        let frontmostWindow = frontmostWindows.first {
+            !($0.title.isEmpty) && $0.title == focusedTitle
+        } ?? frontmostWindows.first
         let targetIndex = windows.firstIndex { $0.id == target.id }
         let visibleFraction = targetIndex.map { sampledVisibleFraction(of: windows[$0], at: $0, in: windows) } ?? 0
 
@@ -53,9 +66,10 @@ final class ActivityMonitor {
             frontmostAppName: frontmostApplication?.localizedName ?? frontmostWindow?.appName ?? "알 수 없는 앱",
             frontmostBundleIdentifier: frontmostApplication?.bundleIdentifier ?? frontmostWindow?.bundleIdentifier,
             frontmostWindowID: frontmostWindow?.id,
-            frontmostWindowTitle: focusedWindowTitle(pid: frontmostPID) ?? frontmostWindow?.title ?? "",
+            frontmostWindowTitle: focusedTitle ?? frontmostWindow?.title ?? "",
             targetIsOnScreen: targetIndex != nil,
-            targetVisibleFraction: visibleFraction
+            targetVisibleFraction: visibleFraction,
+            frontmostMonitorName: frontmostWindow?.monitorName
         )
     }
 
@@ -78,9 +92,12 @@ final class ActivityMonitor {
         return result?.stringValue
     }
 
-    private func windowRecords() -> [WindowRecord] {
+    private func windowRecords(onScreenOnly: Bool) -> [WindowRecord] {
+        let options: CGWindowListOption = onScreenOnly
+            ? [.optionOnScreenOnly, .excludeDesktopElements]
+            : [.optionAll, .excludeDesktopElements]
         guard let rawWindows = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements],
+            options,
             kCGNullWindowID
         ) as? [[String: Any]] else {
             return []
@@ -109,9 +126,25 @@ final class ActivityMonitor {
                 bundleIdentifier: app?.bundleIdentifier,
                 title: info[kCGWindowName as String] as? String ?? "",
                 bounds: bounds,
-                alpha: info[kCGWindowAlpha as String] as? Double ?? 1
+                alpha: info[kCGWindowAlpha as String] as? Double ?? 1,
+                isOnScreen: info[kCGWindowIsOnscreen as String] as? Bool ?? false,
+                monitorName: monitorName(for: bounds)
             )
         }
+    }
+
+    private func monitorName(for bounds: CGRect) -> String? {
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return nil }
+        var displayIDs = Array(repeating: CGDirectDisplayID(), count: Int(count))
+        guard CGGetActiveDisplayList(count, &displayIDs, &count) == .success else { return nil }
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        guard let match = displayIDs.prefix(Int(count)).enumerated().first(where: { _, displayID in
+            CGDisplayBounds(displayID).contains(center)
+        }) else { return nil }
+        return NSScreen.screens.first(where: {
+            ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == match.element
+        })?.localizedName ?? "모니터 \(match.offset + 1)"
     }
 
     private func focusedWindowTitle(pid: Int32?) -> String? {

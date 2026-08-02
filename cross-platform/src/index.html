@@ -16,9 +16,9 @@
         <div class="overlay-controls no-drag">
           <button id="overlay-pause" aria-label="일시정지">Ⅱ</button>
           <button id="overlay-stop" aria-label="종료">■</button>
+          <button id="overlay-settings" aria-label="설정 열기">☷</button>
           <button id="overlay-close" aria-label="오버레이 닫기">×</button>
         </div>
-        <div class="overlay-unlock">⌘/Ctrl + Shift + F</div>
       </div>
     </section>
 
@@ -69,6 +69,12 @@
         <div id="wayland-warning" class="warning" hidden>
           Wayland에서는 다른 앱의 활성 창을 읽을 수 없어 모니터 이탈을 커서 위치로 판정합니다. X11에서는 창과 모니터를 모두 감지합니다.
         </div>
+
+        <section class="focus-inspector">
+          <article><span>SELECTED WINDOW</span><strong id="inspector-target">선택 없음</strong><small id="inspector-target-detail">창 번호와 모니터가 표시됩니다</small></article>
+          <article><span>ACTIVE NOW</span><strong id="inspector-active">측정 대기</strong><small id="inspector-active-detail">1초마다 갱신됩니다</small></article>
+          <article><span>TIMER VERDICT</span><strong id="inspector-verdict">READY</strong><small id="inspector-verdict-detail">집중 판정 사유</small></article>
+        </section>
 
         <section class="metric-grid">
           <article><span>FOCUSED</span><strong id="metric-focused">00:00</strong></article>

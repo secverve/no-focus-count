@@ -15,6 +15,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  boundedElapsedSeconds,
   displayForBounds,
   evaluateFocus,
   mergeSettings,
@@ -32,7 +33,9 @@ let dataFile;
 let state;
 let tickBusy = false;
 let saveTimer;
-let overlayInteractiveTimer;
+let overlayInteractive = null;
+let overlayShortcutUnlockUntil = 0;
+let measurementTickAt = Date.now();
 let systemPowerInactive = false;
 
 function freshRuntime(settings) {
@@ -44,7 +47,8 @@ function freshRuntime(settings) {
     completedCycles: 0,
     currentSession: null,
     currentEventIndex: null,
-    lastContext: null
+    lastContext: null,
+    lastFocusReason: 'ready'
   };
 }
 
@@ -160,9 +164,10 @@ function createDashboardWindow() {
 }
 
 function createOverlayWindow() {
+  overlayInteractive = null;
   overlayWindow = new BrowserWindow({
-    width: 390,
-    height: 180,
+    width: 336,
+    height: 136,
     transparent: true,
     backgroundColor: '#00000000',
     frame: false,
@@ -187,6 +192,10 @@ function createOverlayWindow() {
     if (!screenshotPath) return;
     showOverlay();
     setTimeout(async () => {
+      if (process.env.NFC_OVERLAY_PREVIEW_UNLOCKED === '1') {
+        await overlayWindow.webContents.executeJavaScript("document.body.classList.add('overlay-unlocked')");
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
       const image = await overlayWindow.webContents.capturePage();
       await fs.writeFile(screenshotPath, image.toPNG());
     }, 1200);
@@ -194,39 +203,70 @@ function createOverlayWindow() {
   overlayWindow.setAlwaysOnTop(true, process.platform === 'darwin' ? 'floating' : 'normal');
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   setOverlayInteractive(false);
-  overlayWindow.on('closed', () => { overlayWindow = undefined; });
+  overlayWindow.on('moved', () => {
+    if (!state || !overlayWindow || overlayWindow.isDestroyed()) return;
+    const [x, y] = overlayWindow.getPosition();
+    state.settings.overlayPosition = { x, y };
+    scheduleSave();
+  });
+  overlayWindow.on('closed', () => {
+    overlayInteractive = null;
+    overlayWindow = undefined;
+  });
 }
 
 function showOverlay() {
   if (!overlayWindow || overlayWindow.isDestroyed()) createOverlayWindow();
-  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-  const [width, height] = overlayWindow.getSize();
-  overlayWindow.setPosition(
-    Math.round(display.workArea.x + display.workArea.width - width - 28),
-    Math.round(display.workArea.y + 28)
-  );
+  const saved = state?.settings.overlayPosition;
+  const savedPoint = saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)
+    ? { x: Math.round(saved.x), y: Math.round(saved.y) }
+    : null;
+  const savedDisplay = savedPoint && screen.getAllDisplays().find(display => (
+    savedPoint.x >= display.workArea.x - 200
+    && savedPoint.x < display.workArea.x + display.workArea.width
+    && savedPoint.y >= display.workArea.y - 80
+    && savedPoint.y < display.workArea.y + display.workArea.height
+  ));
+  if (savedPoint && savedDisplay) {
+    overlayWindow.setPosition(savedPoint.x, savedPoint.y);
+  } else {
+    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    const [width] = overlayWindow.getSize();
+    overlayWindow.setPosition(
+      Math.round(display.workArea.x + display.workArea.width - width - 28),
+      Math.round(display.workArea.y + 28)
+    );
+  }
   overlayWindow.showInactive();
   setOverlayInteractive(false);
 }
 
 function setOverlayInteractive(interactive) {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  const next = Boolean(interactive);
+  if (overlayInteractive === next) return;
   try {
-    overlayWindow.setIgnoreMouseEvents(!interactive, { forward: true });
+    overlayWindow.setIgnoreMouseEvents(!next, { forward: true });
   } catch {
-    overlayWindow.setIgnoreMouseEvents(!interactive);
+    overlayWindow.setIgnoreMouseEvents(!next);
   }
+  overlayInteractive = next;
+  overlayWindow.webContents.send('overlay:unlock', next);
+}
+
+function updateOverlayHoverInteraction() {
+  if (!overlayWindow || overlayWindow.isDestroyed() || !overlayWindow.isVisible()) return;
+  const point = screen.getCursorScreenPoint();
+  const bounds = overlayWindow.getBounds();
+  const pointerInside = point.x >= bounds.x && point.x < bounds.x + bounds.width
+    && point.y >= bounds.y && point.y < bounds.y + bounds.height;
+  setOverlayInteractive(pointerInside || Date.now() < overlayShortcutUnlockUntil);
 }
 
 function temporarilyUnlockOverlay() {
   showOverlay();
+  overlayShortcutUnlockUntil = Date.now() + 8000;
   setOverlayInteractive(true);
-  overlayWindow.webContents.send('overlay:unlock', true);
-  clearTimeout(overlayInteractiveTimer);
-  overlayInteractiveTimer = setTimeout(() => {
-    setOverlayInteractive(false);
-    overlayWindow?.webContents.send('overlay:unlock', false);
-  }, 8000);
 }
 
 function displaysForRenderer() {
@@ -320,15 +360,25 @@ function recordDistraction(context, reason) {
 }
 
 async function tick() {
-  if (tickBusy || !state?.runtime.currentSession) return;
-  if (state.runtime.phase === 'paused-user') return;
+  if (!state?.runtime.currentSession) {
+    measurementTickAt = Date.now();
+    return;
+  }
+  if (tickBusy) return;
+  if (state.runtime.phase === 'paused-user') {
+    measurementTickAt = Date.now();
+    return;
+  }
   tickBusy = true;
   try {
     const session = state.runtime.currentSession;
+    const measuredAt = Date.now();
+    const elapsed = boundedElapsedSeconds(measurementTickAt, measuredAt);
+    measurementTickAt = measuredAt;
     if (session.mode === 'break') {
       state.runtime.phase = 'break';
-      session.focusedSeconds += 1;
-      state.runtime.remainingSeconds = Math.max(0, state.runtime.remainingSeconds - 1);
+      session.focusedSeconds += elapsed;
+      state.runtime.remainingSeconds = Math.max(0, state.runtime.remainingSeconds - elapsed);
     } else {
       const context = await currentContext();
       state.runtime.lastContext = context;
@@ -348,13 +398,14 @@ async function tick() {
       if (evaluation.focused) {
         closeCurrentEvent(context.capturedAt);
         state.runtime.phase = 'focusing';
-        session.focusedSeconds += 1;
-        state.runtime.remainingSeconds = Math.max(0, state.runtime.remainingSeconds - 1);
+        session.focusedSeconds += elapsed;
+        state.runtime.remainingSeconds = Math.max(0, state.runtime.remainingSeconds - elapsed);
       } else {
         state.runtime.phase = 'paused-distraction';
-        session.distractionSeconds += 1;
+        session.distractionSeconds += elapsed;
         recordDistraction(context, evaluation.reason);
       }
+      state.runtime.lastFocusReason = evaluation.reason;
     }
 
     if (state.runtime.remainingSeconds <= 0) finishCurrentSession(true);
@@ -388,6 +439,8 @@ function startSession(payload = {}) {
   state.runtime.phase = mode === 'focus' ? 'focusing' : 'break';
   state.runtime.remainingSeconds = plannedSeconds;
   state.runtime.currentEventIndex = null;
+  state.runtime.lastFocusReason = mode === 'focus' ? 'checking' : 'break';
+  measurementTickAt = Date.now();
   if (state.settings.autoOpenOverlay) showOverlay();
   scheduleSave();
   broadcast();
@@ -416,6 +469,7 @@ function finishCurrentSession(completed) {
   state.runtime.phase = completed ? 'completed' : 'idle';
   state.runtime.currentSession = null;
   state.runtime.currentEventIndex = null;
+  state.runtime.lastFocusReason = completed ? 'completed' : 'ready';
 
   if (completed && state.settings.alarmEnabled) fireAlarm(session.mode);
   scheduleSave();
@@ -511,12 +565,17 @@ function registerIPC() {
     state.runtime.phase = state.runtime.phase === 'paused-user'
       ? (state.runtime.mode === 'break' ? 'break' : 'focusing')
       : 'paused-user';
+    measurementTickAt = Date.now();
     broadcast();
   });
   ipcMain.handle('session:stop', () => finishCurrentSession(false));
   ipcMain.handle('overlay:show', () => showOverlay());
   ipcMain.handle('overlay:hide', () => overlayWindow?.hide());
   ipcMain.handle('overlay:set-interactive', (_, interactive) => setOverlayInteractive(Boolean(interactive)));
+  ipcMain.handle('window:show', () => {
+    dashboardWindow?.show();
+    dashboardWindow?.focus();
+  });
   ipcMain.handle('window:minimize', () => dashboardWindow?.minimize());
   ipcMain.handle('window:close', () => dashboardWindow?.close());
   ipcMain.handle('history:clear', () => {
@@ -561,6 +620,7 @@ app.whenReady().then(async () => {
   createDashboardWindow();
   createOverlayWindow();
   globalShortcut.register('CommandOrControl+Shift+F', temporarilyUnlockOverlay);
+  setInterval(updateOverlayHoverInteraction, 100);
   powerMonitor.on('lock-screen', () => { systemPowerInactive = true; });
   powerMonitor.on('suspend', () => { systemPowerInactive = true; });
   powerMonitor.on('unlock-screen', () => { systemPowerInactive = false; });

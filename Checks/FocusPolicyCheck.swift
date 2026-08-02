@@ -22,6 +22,11 @@ struct FocusPolicyCheck {
             result: .differentApplication
         )
         expect(
+            snapshot(pid: 100, windowID: 77, onScreen: true, visible: 1),
+            target: target,
+            result: .differentWindow
+        )
+        expect(
             snapshot(pid: 100, windowID: 42, onScreen: true, visible: 0.3),
             target: target,
             result: .targetCovered

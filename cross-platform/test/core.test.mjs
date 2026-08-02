@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   aggregateFocusByDay,
+  boundedElapsedSeconds,
   displayForBounds,
   evaluateFocus,
   focusScore,
@@ -13,6 +14,12 @@ import {
 test('formatTime renders a readable clock', () => {
   assert.equal(formatTime(1500), '25:00');
   assert.equal(formatTime(-3), '00:00');
+});
+
+test('elapsed measurement follows wall time without counting long stalls', () => {
+  assert.equal(boundedElapsedSeconds(1_000, 2_250), 1.25);
+  assert.equal(boundedElapsedSeconds(1_000, 9_000), 2);
+  assert.equal(boundedElapsedSeconds(2_000, 1_000), 0);
 });
 
 test('displayForBounds selects the monitor containing the window center', () => {
@@ -74,6 +81,7 @@ test('settings migration keeps new theme values', () => {
   const settings = mergeSettings({ theme: { timerColor: '#FFFFFF' } });
   assert.equal(settings.theme.timerColor, '#FFFFFF');
   assert.equal(typeof settings.theme.panelOpacity, 'number');
+  assert.equal(settings.overlayPosition, null);
 });
 
 test('long break follows configured cycle interval', () => {

@@ -1,0 +1,69 @@
+{
+  "name": "no-focus-count",
+  "version": "0.3.0",
+  "description": "Transparent, privacy-first focus timer for macOS, Windows, and Linux",
+  "type": "module",
+  "main": "main.mjs",
+  "author": "secverve",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.mjs",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux"
+  },
+  "dependencies": {
+    "get-windows": "9.3.0"
+  },
+  "devDependencies": {
+    "electron": "43.2.0",
+    "electron-builder": "26.15.3"
+  },
+  "overrides": {
+    "tar": "7.5.21"
+  },
+  "build": {
+    "appId": "io.secverve.nofocuscount",
+    "productName": "No Focus Count",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.mjs",
+      "preload.cjs",
+      "core.mjs",
+      "src/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": ["dmg", "zip"],
+      "minimumSystemVersion": "12.0",
+      "extendInfo": {
+        "NSAccessibilityUsageDescription": "선택한 창과 모니터를 벗어났는지 확인할 때만 사용하며 키 입력은 수집하지 않습니다.",
+        "NSScreenCaptureUsageDescription": "활성 창 제목과 선택 동의한 브라우저 주소를 확인할 때 사용합니다."
+      }
+    },
+    "win": {
+      "target": ["nsis", "portable"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "category": "Utility",
+      "synopsis": "Transparent focus timer and distraction tracker"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "secverve",
+      "repo": "no-focus-count"
+    }
+  }
+}

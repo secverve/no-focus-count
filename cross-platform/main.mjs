@@ -15,11 +15,14 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  applyTodoMutation,
   boundedElapsedSeconds,
   displayForBounds,
   evaluateFocus,
   mergeSettings,
   nextBreakSeconds,
+  normalizeTodos,
+  reconcileFocusDuration,
   todayFocusSeconds
 } from './core.mjs';
 
@@ -58,18 +61,20 @@ async function loadState() {
     const stored = JSON.parse(await fs.readFile(dataFile, 'utf8'));
     const settings = mergeSettings(stored.settings);
     return {
-      version: 3,
+      version: 4,
       updatedAt: stored.updatedAt ?? new Date().toISOString(),
       settings,
+      todos: normalizeTodos(stored.todos),
       history: Array.isArray(stored.history) ? stored.history : [],
       runtime: freshRuntime(settings)
     };
   } catch {
     const settings = mergeSettings();
     return {
-      version: 3,
+      version: 4,
       updatedAt: new Date().toISOString(),
       settings,
+      todos: [],
       history: [],
       runtime: freshRuntime(settings)
     };
@@ -115,6 +120,7 @@ async function saveState() {
     version: state.version,
     updatedAt: state.updatedAt,
     settings: state.settings,
+    todos: state.todos,
     history: state.history
   };
   const temporary = `${dataFile}.tmp`;
@@ -484,17 +490,26 @@ function fireAlarm(mode) {
   dashboardWindow?.flashFrame(true);
 }
 
-function updateSettings(patch = {}) {
+function applySettings(nextSettings) {
   const previousFocus = state.settings.focusMinutes;
-  state.settings = mergeSettings({
+  state.settings = mergeSettings(nextSettings);
+  reconcileFocusDuration(state.runtime, previousFocus, state.settings.focusMinutes);
+}
+
+function updateSettings(patch = {}) {
+  applySettings({
     ...state.settings,
     ...patch,
     theme: { ...state.settings.theme, ...(patch.theme ?? {}) },
     sync: { ...state.settings.sync, ...(patch.sync ?? {}) }
   });
-  if (!state.runtime.currentSession && previousFocus !== state.settings.focusMinutes && state.runtime.suggestedMode === 'focus') {
-    state.runtime.remainingSeconds = state.settings.focusMinutes * 60;
-  }
+  scheduleSave();
+  broadcast();
+  return publicState();
+}
+
+function updateTodos(mutation) {
+  state.todos = applyTodoMutation(state.todos, mutation);
   scheduleSave();
   broadcast();
   return publicState();
@@ -531,6 +546,7 @@ async function runSync(direction) {
         version: state.version,
         updatedAt: state.updatedAt,
         settings: { ...state.settings, sync: undefined },
+        todos: state.todos,
         history: state.history
       })
     });
@@ -542,11 +558,12 @@ async function runSync(direction) {
     const byId = new Map([...state.history, ...(remote.history ?? [])].map(session => [session.id, session]));
     state.history = [...byId.values()].sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
     if (remote.settings) {
-      state.settings = mergeSettings({
+      applySettings({
         ...remote.settings,
         sync: state.settings.sync
       });
     }
+    if (Array.isArray(remote.todos)) state.todos = normalizeTodos(remote.todos);
     scheduleSave();
     broadcast();
   }
@@ -557,6 +574,7 @@ function registerIPC() {
   ipcMain.handle('state:get', () => publicState());
   ipcMain.handle('context:list', async () => ({ windows: await windowOptions(), displays: displaysForRenderer() }));
   ipcMain.handle('settings:update', (_, patch) => updateSettings(patch));
+  ipcMain.handle('todos:update', (_, todos) => updateTodos(todos));
   ipcMain.handle('session:start', (_, payload) => startSession(payload));
   ipcMain.handle('session:pause-toggle', () => {
     if (!state.runtime.currentSession) return;
@@ -587,7 +605,7 @@ function registerIPC() {
       filters: [{ name: 'JSON', extensions: ['json'] }]
     });
     if (!result.canceled && result.filePath) {
-      await fs.writeFile(result.filePath, JSON.stringify({ settings: state.settings, history: state.history }, null, 2));
+      await fs.writeFile(result.filePath, JSON.stringify({ settings: state.settings, todos: state.todos, history: state.history }, null, 2));
     }
     return !result.canceled;
   });
@@ -597,7 +615,8 @@ function registerIPC() {
     const imported = JSON.parse(await fs.readFile(result.filePaths[0], 'utf8'));
     const byId = new Map([...state.history, ...(imported.history ?? [])].map(session => [session.id, session]));
     state.history = [...byId.values()].sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
-    if (imported.settings) state.settings = mergeSettings({ ...state.settings, ...imported.settings, sync: state.settings.sync });
+    if (Array.isArray(imported.todos)) state.todos = normalizeTodos(imported.todos);
+    if (imported.settings) applySettings({ ...state.settings, ...imported.settings, sync: state.settings.sync });
     scheduleSave();
     broadcast();
     return true;

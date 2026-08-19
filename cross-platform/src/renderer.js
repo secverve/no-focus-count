@@ -2,12 +2,20 @@ const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
 const isOverlay = new URLSearchParams(location.search).get('overlay') === '1';
 
+const displayFontStacks = Object.freeze({
+  rounded: 'ui-rounded, "SF Pro Rounded", "Segoe UI Variable", "Segoe UI", "Noto Sans", sans-serif',
+  sans: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", sans-serif',
+  mono: 'ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", "Noto Sans Mono", monospace',
+  serif: 'ui-serif, "New York", "Noto Serif", "Times New Roman", serif'
+});
+
 let state;
 let context = { windows: [], displays: [] };
 let selectedMode = 'focus';
 let calendarCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 let switcherDisplayId = null;
 let switcherWindowId = null;
+const TODO_LIMIT = 24;
 
 const reasonLabels = {
   ready: '준비',
@@ -50,6 +58,7 @@ const phaseLabel = phase => ({
 
 function applyTheme(theme) {
   const root = document.documentElement;
+  const surfaceTransparency = Math.min(0.8, Math.max(0, Number(theme.surfaceTransparency) || 0));
   root.style.setProperty('--timer', theme.timerColor);
   root.style.setProperty('--accent', theme.accentColor);
   root.style.setProperty('--panel', theme.panelColor);
@@ -60,6 +69,8 @@ function applyTheme(theme) {
   root.style.setProperty('--timer-size', `${theme.timerSize}px`);
   root.style.setProperty('--overlay-timer-size', `${theme.overlayTimerSize}px`);
   root.style.setProperty('--shadow', theme.shadowStrength);
+  root.style.setProperty('--surface-opacity', String(1 - surfaceTransparency));
+  root.style.setProperty('--display-font', displayFontStacks[theme.displayFont] ?? displayFontStacks.rounded);
 }
 
 function renderOverlay() {
@@ -106,8 +117,10 @@ function renderDashboard() {
   $('#metric-cycles').textContent = String(runtime.completedCycles);
   $('#wayland-warning').hidden = !state.capabilities.waylandLimited;
   renderFocusInspector();
+  renderTodos();
 
   const settings = state.settings;
+  setValue('#focus-duration', settings.focusMinutes);
   setValue('#participant-name', settings.participantName);
   setValue('#focus-minutes', settings.focusMinutes);
   setValue('#break-minutes', settings.breakMinutes);
@@ -126,6 +139,8 @@ function renderDashboard() {
   setValue('#timer-color', settings.theme.timerColor);
   setValue('#accent-color', settings.theme.accentColor);
   setValue('#panel-color', settings.theme.panelColor);
+  setValue('#display-font', settings.theme.displayFont);
+  setRange('#surface-transparency', settings.theme.surfaceTransparency, `${Math.round(settings.theme.surfaceTransparency * 100)}%`);
   setRange('#panel-opacity', settings.theme.panelOpacity, `${Math.round(settings.theme.panelOpacity * 100)}%`);
   setRange('#overlay-opacity', settings.theme.overlayOpacity, `${Math.round(settings.theme.overlayOpacity * 100)}%`);
   setRange('#theme-blur', settings.theme.blur, `${settings.theme.blur}px`);
@@ -143,6 +158,60 @@ function setRange(selector, value, output) {
   const element = $(selector);
   if (document.activeElement !== element) element.value = value;
   element.closest('label').querySelector('output').textContent = output;
+}
+
+function orderedTodos() {
+  return [...(state.todos ?? [])].sort((a, b) => (
+    Number(a.completed) - Number(b.completed)
+  ));
+}
+
+async function saveFocusMinutes(value) {
+  const minutes = Math.min(180, Math.max(1, Math.round(Number(value) || state.settings.focusMinutes)));
+  state = await window.nfc.updateSettings({ focusMinutes: minutes });
+  renderDashboard();
+}
+
+async function saveTodos(mutation) {
+  state = await window.nfc.updateTodos(mutation);
+  renderTodos();
+}
+
+function renderTodos() {
+  const todos = orderedTodos();
+  const completed = todos.filter(todo => todo.completed).length;
+  $('#todo-progress').textContent = `${completed} / ${todos.length} 완료`;
+  $('#todo-empty').hidden = todos.length > 0;
+  $('#todo-list').hidden = todos.length === 0;
+  $('#todo-add').disabled = todos.length >= TODO_LIMIT;
+  $('#todo-list').replaceChildren(...todos.map(todo => {
+    const item = document.createElement('li');
+    item.className = `todo-item${todo.completed ? ' completed' : ''}`;
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = todo.completed;
+    checkbox.setAttribute('aria-label', `${todo.title} 완료`);
+    checkbox.addEventListener('change', () => void saveTodos({
+      type: 'complete',
+      id: todo.id,
+      completed: checkbox.checked
+    }));
+
+    const title = document.createElement('strong');
+    title.textContent = todo.title;
+    title.title = todo.title;
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'todo-remove';
+    remove.textContent = '삭제';
+    remove.setAttribute('aria-label', `${todo.title} 삭제`);
+    remove.addEventListener('click', () => void saveTodos({ type: 'remove', id: todo.id }));
+
+    item.append(checkbox, title, remove);
+    return item;
+  }));
 }
 
 function renderHistory() {
@@ -486,6 +555,21 @@ function bindDashboard() {
   $('#stop-action').addEventListener('click', window.nfc.stopSession);
   $('#refresh-context').addEventListener('click', refreshContext);
   $('#open-window-switcher').addEventListener('click', openWindowSwitcher);
+  $('#focus-duration').addEventListener('change', event => void saveFocusMinutes(event.currentTarget.value));
+  $('#focus-duration-minus').addEventListener('click', () => void saveFocusMinutes(Number($('#focus-duration').value) - 5));
+  $('#focus-duration-plus').addEventListener('click', () => void saveFocusMinutes(Number($('#focus-duration').value) + 5));
+  $('#todo-form').addEventListener('submit', event => {
+    event.preventDefault();
+    const title = $('#todo-title').value.trim();
+    if (!title || (state.todos ?? []).length >= TODO_LIMIT) {
+      event.currentTarget.reportValidity();
+      return;
+    }
+    const todo = { id: crypto.randomUUID(), title, completed: false };
+    $('#todo-title').value = '';
+    $('#todo-title').focus();
+    void saveTodos({ type: 'add', todo });
+  });
   $('#target-window').addEventListener('change', () => {
     updateSelectedWindowLabel();
     renderFocusInspector();
@@ -566,6 +650,8 @@ function bindDashboard() {
     '#timer-color': ['timerColor', String],
     '#accent-color': ['accentColor', String],
     '#panel-color': ['panelColor', String],
+    '#display-font': ['displayFont', String],
+    '#surface-transparency': ['surfaceTransparency', Number],
     '#panel-opacity': ['panelOpacity', Number],
     '#overlay-opacity': ['overlayOpacity', Number],
     '#theme-blur': ['blur', Number],

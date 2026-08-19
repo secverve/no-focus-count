@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  applyTodoMutation,
   aggregateFocusByDay,
   boundedElapsedSeconds,
   displayForBounds,
@@ -8,7 +9,9 @@ import {
   focusScore,
   formatTime,
   mergeSettings,
-  nextBreakSeconds
+  nextBreakSeconds,
+  normalizeTodos,
+  reconcileFocusDuration
 } from '../core.mjs';
 
 test('formatTime renders a readable clock', () => {
@@ -111,7 +114,65 @@ test('settings migration keeps new theme values', () => {
   const settings = mergeSettings({ theme: { timerColor: '#FFFFFF' } });
   assert.equal(settings.theme.timerColor, '#FFFFFF');
   assert.equal(typeof settings.theme.panelOpacity, 'number');
+  assert.equal(settings.theme.surfaceTransparency, 0);
+  assert.equal(settings.theme.displayFont, 'rounded');
   assert.equal(settings.overlayPosition, null);
+});
+
+test('appearance settings preserve supported fonts and bound transparency', () => {
+  const customized = mergeSettings({
+    theme: { displayFont: 'mono', surfaceTransparency: 0.42 }
+  });
+  assert.equal(customized.theme.displayFont, 'mono');
+  assert.equal(customized.theme.surfaceTransparency, 0.42);
+
+  const invalid = mergeSettings({
+    theme: { displayFont: 'url(https://example.com/font.woff2)', surfaceTransparency: 9 }
+  });
+  assert.equal(invalid.theme.displayFont, 'rounded');
+  assert.equal(invalid.theme.surfaceTransparency, 0.8);
+  assert.equal(mergeSettings({ theme: { surfaceTransparency: -1 } }).theme.surfaceTransparency, 0);
+});
+
+test('todo normalization keeps safe checklist goals and bounds stored data', () => {
+  const todos = normalizeTodos([
+    { id: 'morning', title: '  기획서 마무리  ', completed: true },
+    { id: 'morning', title: '중복 ID' },
+    { id: '<style>', title: '자료 검토' },
+    { id: 'empty', title: '   ' }
+  ]);
+  assert.deepEqual(todos, [
+    { id: 'morning', title: '기획서 마무리', completed: true },
+    { id: 'todo-1', title: '중복 ID', completed: false },
+    { id: 'todo-2', title: '자료 검토', completed: false }
+  ]);
+  assert.equal(normalizeTodos(Array.from({ length: 30 }, (_, index) => ({
+    id: `goal-${index}`,
+    title: `목표 ${index}`
+  }))).length, 24);
+});
+
+test('focus duration is rounded and bounded at the settings boundary', () => {
+  assert.equal(mergeSettings({ focusMinutes: 42.7 }).focusMinutes, 43);
+  assert.equal(mergeSettings({ focusMinutes: -10 }).focusMinutes, 1);
+  assert.equal(mergeSettings({ focusMinutes: 999 }).focusMinutes, 180);
+  assert.equal(mergeSettings({ focusMinutes: 'invalid' }).focusMinutes, 25);
+});
+
+test('imported focus duration updates an idle focus countdown', () => {
+  const runtime = { currentSession: null, suggestedMode: 'focus', remainingSeconds: 1500 };
+  reconcileFocusDuration(runtime, 25, 45);
+  assert.equal(runtime.remainingSeconds, 2700);
+});
+
+test('rapid todo completion mutations preserve both changes', () => {
+  const initial = [
+    { id: 'race-a', title: '첫 번째 목표', completed: false },
+    { id: 'race-b', title: '두 번째 목표', completed: false }
+  ];
+  const first = applyTodoMutation(initial, { type: 'complete', id: 'race-a', completed: true });
+  const second = applyTodoMutation(first, { type: 'complete', id: 'race-b', completed: true });
+  assert.deepEqual(second.map(todo => todo.completed), [true, true]);
 });
 
 test('long break follows configured cycle interval', () => {

@@ -34,6 +34,23 @@
       </header>
 
       <div class="content">
+        <section class="todo-board no-drag" aria-labelledby="todo-board-title">
+          <header class="todo-board-head">
+            <div><span>FOCUS PLAN</span><strong id="todo-board-title">오늘 집중 계획</strong></div>
+            <output id="todo-progress" aria-live="polite">0 / 0 완료</output>
+          </header>
+          <div class="plan-controls">
+            <label class="plan-duration"><span>집중 시간</span><span class="duration-stepper"><button id="focus-duration-minus" type="button" aria-label="집중 시간 5분 줄이기">−</button><input id="focus-duration" type="number" min="1" max="180" step="5" inputmode="numeric" aria-label="집중 시간(분)"><em>분</em><button id="focus-duration-plus" type="button" aria-label="집중 시간 5분 늘리기">+</button></span></label>
+            <label class="plan-monitor"><span>집중할 모니터</span><select id="target-display"><option value="">모니터를 불러오는 중…</option></select></label>
+          </div>
+          <form id="todo-form" class="todo-form">
+            <label class="todo-title-field"><span>목표 체크리스트</span><input id="todo-title" type="text" maxlength="80" autocomplete="off" placeholder="예: 기획서 1차 초안 완성" required></label>
+            <button id="todo-add" type="submit">추가</button>
+          </form>
+          <ul id="todo-list" class="todo-list" aria-label="오늘 목표 체크리스트"></ul>
+          <p id="todo-empty" class="todo-empty">이번 집중 시간에 끝낼 목표를 체크리스트로 추가하세요.</p>
+        </section>
+
         <section class="timer-zone">
           <div class="timer-aura"></div>
           <div class="mode-switch no-drag">
@@ -61,10 +78,6 @@
             <button id="open-window-switcher" type="button"><strong id="selected-window-label">창을 불러오는 중…</strong><small>ALT-TAB 방식으로 선택</small></button>
             <select id="target-window" class="hidden-context-select" aria-hidden="true" tabindex="-1"><option value="">창을 불러오는 중…</option></select>
           </div>
-          <label>
-            <span>집중 모니터</span>
-            <select id="target-display"><option value="">모니터를 불러오는 중…</option></select>
-          </label>
           <button id="refresh-context" title="창과 모니터 새로고침">↻</button>
         </section>
 
@@ -120,6 +133,8 @@
             <label class="field color-field"><span>숫자 색</span><input id="timer-color" type="color"></label>
             <label class="field color-field"><span>포인트 색</span><input id="accent-color" type="color"></label>
             <label class="field color-field"><span>패널 색</span><input id="panel-color" type="color"></label>
+            <label class="field select-field"><span>표시 글꼴</span><select id="display-font"><option value="rounded">둥근 고딕</option><option value="sans">시스템 고딕</option><option value="mono">고정폭</option><option value="serif">명조</option></select></label>
+            <label class="field range-field"><span>전체 표시 투명도</span><input id="surface-transparency" type="range" min="0" max="0.8" step="0.01"><output></output></label>
             <label class="field range-field"><span>대시보드 투명도</span><input id="panel-opacity" type="range" min="0" max="0.7" step="0.01"><output></output></label>
             <label class="field range-field"><span>오버레이 투명도</span><input id="overlay-opacity" type="range" min="0" max="0.6" step="0.01"><output></output></label>
             <label class="field range-field"><span>배경 블러</span><input id="theme-blur" type="range" min="0" max="40" step="1"><output></output></label>

@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('nfc', {
   },
   listContext: () => ipcRenderer.invoke('context:list'),
   updateSettings: patch => ipcRenderer.invoke('settings:update', patch),
+  updateTodos: todos => ipcRenderer.invoke('todos:update', todos),
   startSession: payload => ipcRenderer.invoke('session:start', payload),
   togglePause: () => ipcRenderer.invoke('session:pause-toggle'),
   stopSession: () => ipcRenderer.invoke('session:stop'),
